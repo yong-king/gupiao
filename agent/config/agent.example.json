@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 8090,
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "api_key_env": "DEEPSEEK_API_KEY"
+  }
+}

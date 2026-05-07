@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: jijin
+      POSTGRES_PASSWORD: jijin
+      POSTGRES_DB: jijin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ../backend
+    environment:
+      GO_BACKEND_ADDR: ":8080"
+      DATABASE_URL: postgres://jijin:jijin@postgres:5432/jijin?sslmode=disable
+      REDIS_ADDR: redis:6379
+      AGENT_URL: http://agent:8090
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      REPOSITORY_REMOTE_URL: ${REPOSITORY_REMOTE_URL:-}
+      REPOSITORY_BRANCH: ${REPOSITORY_BRANCH:-main}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  agent:
+    build:
+      context: ../agent
+    environment:
+      AGENT_HOST: "0.0.0.0"
+      AGENT_PORT: "8090"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    ports:
+      - "8090:8090"
+
+  frontend:
+    build:
+      context: ../frontend
+    ports:
+      - "8081:80"
+
+volumes:
+  postgres_data:

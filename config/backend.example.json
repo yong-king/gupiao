@@ -1,0 +1,28 @@
+{
+  "addr": ":8080",
+  "database_url": "postgres://jijin:jijin@localhost:5432/jijin?sslmode=disable",
+  "redis_addr": "localhost:6379",
+  "agent_url": "http://127.0.0.1:8090",
+  "auth": {
+    "required": true,
+    "session_ttl_minutes": 1440
+  },
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "api_key_env": "DEEPSEEK_API_KEY"
+  },
+  "repository": {
+    "remote_url": "",
+    "branch": "main",
+    "ask_before_commit": true
+  },
+  "stock_sources": [
+    {
+      "name": "stooq",
+      "type": "stooq",
+      "base_url": "https://stooq.com/q/l/",
+      "rate_limit_per_minute": 20
+    }
+  ]
+}

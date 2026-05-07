@@ -1,0 +1,6 @@
+{
+  "remote_url": "",
+  "branch": "main",
+  "ask_before_commit": true,
+  "commit_message_prefix": "chore: update stock agent project"
+}

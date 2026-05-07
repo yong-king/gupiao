@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>股票监控操作台</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #17202a;
+        background: #f6f8fa;
+      }
+      #app {
+        min-height: 100vh;
+      }
+      #app.app-shell {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+      }
+      #app.auth-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        place-items: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .sidebar {
+        background: #102033;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .sidebar button {
+        min-height: 36px;
+        border: 0;
+        border-radius: 6px;
+        background: #1d334d;
+        color: #fff;
+        cursor: pointer;
+        font-size: 15px;
+        text-align: left;
+        padding: 8px 10px;
+      }
+      .sidebar button.active,
+      .sidebar button:hover {
+        background: #2f5f8f;
+      }
+      .content {
+        padding: 24px;
+      }
+      .topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .userbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .view-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 18px 0 14px;
+      }
+      .safety-badge {
+        border: 1px solid #a8c7e6;
+        border-radius: 999px;
+        color: #1d4f7a;
+        background: #eaf4ff;
+        padding: 4px 10px;
+        white-space: nowrap;
+      }
+      .muted {
+        color: #657282;
+      }
+      .code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: #f0f3f6;
+        border-radius: 6px;
+        padding: 8px;
+        overflow-wrap: anywhere;
+      }
+      .price-chart {
+        width: 100%;
+        height: 180px;
+        display: block;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+      }
+      .chart-grid {
+        fill: none;
+        stroke: #d8dee4;
+        stroke-width: 1;
+      }
+      .chart-line {
+        fill: none;
+        stroke: #1d7a5f;
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .stock-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      .stock-table th,
+      .stock-table td {
+        border-bottom: 1px solid #e2e8f0;
+        padding: 8px;
+        text-align: left;
+        vertical-align: middle;
+      }
+      .change-calendar {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .calendar-cell {
+        min-height: 54px;
+        border: 1px solid #d8dee4;
+        border-radius: 6px;
+        padding: 6px;
+        display: grid;
+        align-content: space-between;
+        background: #f8fafc;
+      }
+      .calendar-cell span {
+        font-size: 12px;
+      }
+      .calendar-cell.up {
+        background: #eaf8ef;
+        border-color: #b7dfc3;
+        color: #126437;
+      }
+      .calendar-cell.down {
+        background: #fff0f0;
+        border-color: #efb4b4;
+        color: #9b1c1c;
+      }
+      article {
+        background: #fff;
+        border: 1px solid #d8dee4;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      h1, h2, h3 {
+        margin-top: 0;
+      }
+      .auth {
+        width: min(420px, 100%);
+      }
+      .auth-card {
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid #d8dee4;
+        border-radius: 8px;
+        padding: 20px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        margin: 12px 0;
+      }
+      input, select, button {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      input {
+        min-height: 34px;
+        border: 1px solid #c8d1dc;
+        border-radius: 6px;
+        padding: 0 8px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      @media (max-width: 700px) {
+        #app.app-shell {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          flex-direction: row;
+          overflow-x: auto;
+        }
+        .sidebar button {
+          white-space: nowrap;
+        }
+        .topbar,
+        .view-header {
+          display: grid;
+        }
+        .userbar {
+          justify-content: flex-start;
+        }
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./src/main.js?v=19"></script>
+  </body>
+</html>
