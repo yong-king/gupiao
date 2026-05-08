@@ -33,7 +33,49 @@ type RAGDocument struct {
 	SourceID   string
 	Content    string
 	Metadata   map[string]string
+	Embedding  []float64
 	CreatedAt  time.Time
+}
+
+type WorkflowJob struct {
+	ID             string         `json:"id"`
+	UserID         string         `json:"user_id"`
+	WorkflowType   string         `json:"workflow_type"`
+	AttentionLevel string         `json:"attention_level"`
+	Market         string         `json:"market"`
+	Symbol         string         `json:"symbol"`
+	Status         string         `json:"status"`
+	TargetCount    int            `json:"target_count"`
+	Summary        string         `json:"summary"`
+	Error          string         `json:"error"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	Steps          []WorkflowStep `json:"steps"`
+}
+
+type WorkflowStep struct {
+	ID            string    `json:"id"`
+	JobID         string    `json:"job_id"`
+	StepName      string    `json:"step_name"`
+	AgentName     string    `json:"agent_name"`
+	Status        string    `json:"status"`
+	InputSummary  string    `json:"input_summary"`
+	OutputSummary string    `json:"output_summary"`
+	Error         string    `json:"error"`
+	StartedAt     time.Time `json:"started_at"`
+	CompletedAt   time.Time `json:"completed_at"`
+}
+
+type AssistantMessage struct {
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	Market         string    `json:"market"`
+	Symbol         string    `json:"symbol"`
+	Question       string    `json:"question"`
+	Answer         string    `json:"answer"`
+	ContextSummary string    `json:"context_summary"`
+	RAGDocumentIDs []string  `json:"rag_document_ids"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
@@ -475,7 +517,14 @@ func (s *Store) SaveRAGDocument(document RAGDocument) error {
 	if document.Metadata == nil {
 		document.Metadata = map[string]string{}
 	}
+	if len(document.Embedding) == 0 {
+		document.Embedding = []float64{}
+	}
 	metadata, err := json.Marshal(document.Metadata)
+	if err != nil {
+		return err
+	}
+	embedding, err := json.Marshal(document.Embedding)
 	if err != nil {
 		return err
 	}
@@ -493,9 +542,123 @@ func (s *Store) SaveRAGDocument(document RAGDocument) error {
 	vectorID := document.ID + ":vector"
 	if _, err := tx.Exec(`INSERT INTO rag_vectors(id,rag_document_id,provider,model,embedding,status,created_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7)
-		ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status`,
-		vectorID, document.ID, "local", "pending-embedding", "[]", "pending_embedding", document.CreatedAt); err != nil {
+		ON CONFLICT (id) DO UPDATE SET embedding=EXCLUDED.embedding,status=EXCLUDED.status`,
+		vectorID, document.ID, "local", "deterministic-hash-v1", string(embedding), "indexed", document.CreatedAt); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) ListRAGDocuments(userID string, market string, symbol string, limit int) ([]RAGDocument, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.db.Query(`SELECT id,user_id,market,symbol,source_type,source_id,content,metadata,created_at
+		FROM rag_documents
+		WHERE user_id=$1 AND market=$2 AND symbol=$3
+		ORDER BY created_at DESC
+		LIMIT $4`, userID, market, symbol, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RAGDocument{}
+	for rows.Next() {
+		var document RAGDocument
+		var metadata string
+		if err := rows.Scan(&document.ID, &document.UserID, &document.Market, &document.Symbol, &document.SourceType, &document.SourceID, &document.Content, &metadata, &document.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(metadata), &document.Metadata)
+		out = append(out, document)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SaveWorkflowJob(job WorkflowJob) error {
+	now := time.Now().UTC()
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = now
+	}
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = now
+	}
+	_, err := s.db.Exec(`INSERT INTO agent_workflow_jobs(id,user_id,workflow_type,attention_level,market,symbol,status,target_count,summary,error,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,target_count=EXCLUDED.target_count,summary=EXCLUDED.summary,error=EXCLUDED.error,updated_at=EXCLUDED.updated_at`,
+		job.ID, job.UserID, job.WorkflowType, job.AttentionLevel, job.Market, job.Symbol, job.Status, job.TargetCount, job.Summary, job.Error, job.CreatedAt, job.UpdatedAt)
+	return err
+}
+
+func (s *Store) SaveWorkflowStep(step WorkflowStep) error {
+	now := time.Now().UTC()
+	if step.StartedAt.IsZero() {
+		step.StartedAt = now
+	}
+	if step.CompletedAt.IsZero() {
+		step.CompletedAt = now
+	}
+	_, err := s.db.Exec(`INSERT INTO agent_workflow_steps(id,job_id,step_name,agent_name,status,input_summary,output_summary,error,started_at,completed_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,output_summary=EXCLUDED.output_summary,error=EXCLUDED.error,completed_at=EXCLUDED.completed_at`,
+		step.ID, step.JobID, step.StepName, step.AgentName, step.Status, step.InputSummary, step.OutputSummary, step.Error, step.StartedAt, step.CompletedAt)
+	return err
+}
+
+func (s *Store) ListWorkflowJobs(userID string, limit int) ([]WorkflowJob, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`SELECT id,user_id,workflow_type,attention_level,market,symbol,status,target_count,summary,error,created_at,updated_at
+		FROM agent_workflow_jobs WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkflowJob{}
+	for rows.Next() {
+		var job WorkflowJob
+		if err := rows.Scan(&job.ID, &job.UserID, &job.WorkflowType, &job.AttentionLevel, &job.Market, &job.Symbol, &job.Status, &job.TargetCount, &job.Summary, &job.Error, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			return nil, err
+		}
+		steps, err := s.ListWorkflowSteps(job.ID)
+		if err != nil {
+			return nil, err
+		}
+		job.Steps = steps
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListWorkflowSteps(jobID string) ([]WorkflowStep, error) {
+	rows, err := s.db.Query(`SELECT id,job_id,step_name,agent_name,status,input_summary,output_summary,error,started_at,completed_at
+		FROM agent_workflow_steps WHERE job_id=$1 ORDER BY started_at`, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkflowStep{}
+	for rows.Next() {
+		var step WorkflowStep
+		if err := rows.Scan(&step.ID, &step.JobID, &step.StepName, &step.AgentName, &step.Status, &step.InputSummary, &step.OutputSummary, &step.Error, &step.StartedAt, &step.CompletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, step)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SaveAssistantMessage(message AssistantMessage) error {
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	ragIDs, err := json.Marshal(message.RAGDocumentIDs)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO stock_assistant_messages(id,user_id,market,symbol,question,answer,context_summary,rag_document_ids,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		message.ID, message.UserID, message.Market, message.Symbol, message.Question, message.Answer, message.ContextSummary, string(ragIDs), message.CreatedAt)
+	return err
 }

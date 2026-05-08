@@ -5,6 +5,7 @@ export const navItems = [
   { id: "refresh", label: "刷新任务" },
   { id: "alerts", label: "提醒中心" },
   { id: "reports", label: "分析报告" },
+  { id: "assistant", label: "股票助手" },
   { id: "accounts", label: "账户监控" },
   { id: "settings", label: "系统设置" },
 ];
@@ -39,6 +40,11 @@ export const viewCopy = {
     title: "分析报告",
     description: "汇总行情、规则触发和组合风险，辅助人工决策。",
     empty: "盘后生成每日复盘。",
+  },
+  assistant: {
+    title: "股票助手",
+    description: "输入持仓、股票池或任意股票代码，结合 RAG、行情和公司信息进行研究问答。",
+    empty: "先输入股票代码和问题，助手会返回研究型分析，不会给出自动交易指令。",
   },
   accounts: {
     title: "账户监控",

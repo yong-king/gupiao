@@ -140,6 +140,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/accounts", s.requireAuth(s.handleAccounts))
 	mux.HandleFunc("/api/system/dependencies", s.requireAuth(s.handleSystemDependencies))
 	mux.HandleFunc("/api/research/collect", s.requireAuth(s.handleResearchCollect))
+	mux.HandleFunc("/api/workflows", s.requireAuth(s.handleWorkflows))
+	mux.HandleFunc("/api/workflows/research/run", s.requireAuth(s.handleWorkflowRun))
+	mux.HandleFunc("/api/assistant/chat", s.requireAuth(s.handleAssistantChat))
 	return withCORS(mux)
 }
 

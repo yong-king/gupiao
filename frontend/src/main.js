@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=23";
-import { deleteJSON, getJSON, postJSON } from "./api.js?v=23";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=23";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=24";
+import { deleteJSON, getJSON, postJSON } from "./api.js?v=24";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=24";
 
 const root = document.querySelector("#app");
 const state = {
@@ -30,6 +30,9 @@ const state = {
   dependencies: null,
   accountConfigs: [],
   researchResult: null,
+  workflows: [],
+  workflowResult: null,
+  assistantAnswer: null,
 };
 
 applyTheme();
@@ -116,6 +119,7 @@ function renderViewBody(view) {
   if (state.activeView === "refresh") return renderRefreshView();
   if (state.activeView === "alerts") return renderAlertsView(view);
   if (state.activeView === "reports") return renderReportsView(view);
+  if (state.activeView === "assistant") return renderAssistantView(view);
   if (state.activeView === "accounts") return renderAccountsView();
   return renderSettingsView(view);
 }
@@ -436,6 +440,17 @@ function renderReportsView(view) {
         <p>${holding ? holdingSummary(holding) : "当前选中股票不在持仓中，可继续作为自选股票分析。"}</p>
       </article>
       <article>
+        <h3>关注等级 AI 工作流</h3>
+        <p class="muted">按持仓关注等级批量运行：高 4 小时、中 6 小时、低 1 天。每次会记录 Agent 步骤，写入 RAG 和本地向量。</p>
+        <div class="actions">
+          <button data-run-workflow="high" type="button">运行高关注</button>
+          <button data-run-workflow="medium" type="button">运行中关注</button>
+          <button data-run-workflow="low" type="button">运行低关注</button>
+          <button id="load-workflows" type="button">刷新工作流记录</button>
+        </div>
+        ${state.workflowResult ? `<p class="research-summary">${valueOf(state.workflowResult, "job")?.summary || valueOf(state.workflowResult, "Job")?.Summary || "工作流已执行。"}</p>` : ""}
+      </article>
+      <article>
         <h3>详细曲线</h3>
         <p class="market-number">${summarizeMarketNumbers(latestSnapshot, latestChange)}</p>
         ${renderPriceChart(state.snapshots)}
@@ -455,6 +470,50 @@ function renderReportsView(view) {
         <p>${state.profile ? valueOf(state.profile, "analysis", "Analysis") : "点击采集后展示业务、产品和趋势归纳。"}</p>
         ${state.researchResult ? `<p class="research-summary">${state.researchResult.summary || state.researchResult.Summary}</p>` : ""}
         <p class="muted">${state.profile ? valueOf(state.profile, "disclaimer", "Disclaimer") : "仅用于监控和研究，不构成投资建议。"}</p>
+      </article>
+    </section>
+  `;
+}
+
+function renderAssistantView(view) {
+  const targets = analysisTargets();
+  const workflowRows = state.workflows.map((job) => {
+    const steps = asArray(valueOf(job, "Steps", "steps"));
+    return `<tr>
+      <td>${valueOf(job, "AttentionLevel", "attention_level")}</td>
+      <td>${valueOf(job, "Status", "status")}</td>
+      <td>${valueOf(job, "TargetCount", "target_count")}</td>
+      <td>${escapeHTML(valueOf(job, "Summary", "summary") || "")}</td>
+      <td>${steps.length}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>股票对话助手</h3>
+        <label>从已有股票选择
+          <select id="assistant-source">
+            <option value="">手动输入</option>
+            ${stockOptions(targets)}
+          </select>
+        </label>
+        ${renderStockPicker("assistant", false)}
+        <label>你的问题
+          <textarea id="assistant-question" rows="5" placeholder="例如：结合我的持仓成本和最近产品信息，分析一下这只股票需要关注什么风险。"></textarea>
+        </label>
+        <div class="actions">
+          <button id="ask-assistant" type="button">开始分析</button>
+          <button id="load-workflows-assistant" type="button">刷新工作流记录</button>
+        </div>
+        <p class="muted">${view.empty}</p>
+      </article>
+      <article>
+        <h3>助手回答</h3>
+        ${state.assistantAnswer ? `<p class="research-summary">${escapeHTML(valueOf(state.assistantAnswer, "Answer", "answer"))}</p><p class="muted">${escapeHTML(valueOf(state.assistantAnswer, "ContextSummary", "context_summary") || "")}</p>` : "<p>暂无回答。</p>"}
+      </article>
+      <article class="wide">
+        <h3>最近 AI 工作流</h3>
+        ${state.workflows.length ? `<table class="stock-table"><thead><tr><th>关注等级</th><th>状态</th><th>股票数</th><th>摘要</th><th>步骤数</th></tr></thead><tbody>${workflowRows}</tbody></table>` : "<p>暂无工作流记录。</p>"}
       </article>
     </section>
   `;
@@ -578,7 +637,12 @@ function bindViewActions() {
   document.querySelector("#collect-report-market")?.addEventListener("click", collectReportMarket);
   document.querySelector("#load-market-analysis")?.addEventListener("click", loadMarketAnalysis);
   document.querySelector("#collect-research")?.addEventListener("click", collectResearchForCurrentStock);
+  document.querySelectorAll("[data-run-workflow]").forEach((button) => button.addEventListener("click", () => runAttentionWorkflow(button.dataset.runWorkflow)));
+  document.querySelector("#load-workflows")?.addEventListener("click", () => loadWorkflows(true));
   document.querySelector("#analyze-holdings")?.addEventListener("click", refreshHoldings);
+  document.querySelector("#assistant-source")?.addEventListener("change", fillAssistantFromSource);
+  document.querySelector("#ask-assistant")?.addEventListener("click", askAssistant);
+  document.querySelector("#load-workflows-assistant")?.addEventListener("click", () => loadWorkflows(true));
   document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
   document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
   document.querySelector("#load-dependencies")?.addEventListener("click", loadDependencies);
@@ -632,7 +696,7 @@ async function authenticate(mode) {
 }
 
 async function bootstrapUserData() {
-  await Promise.allSettled([loadWatchlists(false), loadHoldings(false), loadRules(false), loadAlerts(false), loadAccounts(false)]);
+  await Promise.allSettled([loadWatchlists(false), loadHoldings(false), loadRules(false), loadAlerts(false), loadAccounts(false), loadWorkflows(false)]);
   await ensureDefaultWatchlist();
 }
 
@@ -897,6 +961,11 @@ function fillRuleFromSource() {
   if (key) fillHoldingFormFromKey(key, "rule");
 }
 
+function fillAssistantFromSource() {
+  const key = document.querySelector("#assistant-source")?.value || "";
+  if (key) fillHoldingFormFromKey(key, "assistant");
+}
+
 function fillHoldingFormFromKey(key, prefix) {
   const [market, symbol] = key.split(":");
   setInput(`#${prefix}-market`, market);
@@ -1042,6 +1111,56 @@ async function collectResearchForCurrentStock() {
       attention_level: attentionLevel,
     }, state.token);
     state.message = `${state.selectedMarket}:${state.selectedSymbol} 产品信息总结已保存为 RAG 文档。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function runAttentionWorkflow(level) {
+  try {
+    state.workflowResult = await postJSON("/api/workflows/research/run", {
+      user_id: state.userID,
+      attention_level: level,
+    }, state.token);
+    await loadWorkflows(false);
+    const job = valueOf(state.workflowResult, "job", "Job");
+    state.message = valueOf(job, "summary", "Summary") || `${attentionLabel(level)}关注 AI 工作流已完成。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function loadWorkflows(showMessage) {
+  try {
+    state.workflows = asArray(await getJSON(`/api/workflows?user_id=${encodeURIComponent(state.userID)}`, state.token));
+    if (showMessage) state.message = `已加载 ${state.workflows.length} 条工作流记录。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
+async function askAssistant() {
+  const market = document.querySelector("#assistant-market")?.value || state.selectedMarket;
+  const symbol = (document.querySelector("#assistant-symbol")?.value || "").trim().toUpperCase();
+  const question = document.querySelector("#assistant-question")?.value?.trim() || "";
+  if (!symbol || !question) {
+    state.message = "请填写股票代码和问题。";
+    render();
+    return;
+  }
+  try {
+    state.assistantAnswer = await postJSON("/api/assistant/chat", {
+      user_id: state.userID,
+      market,
+      symbol,
+      question,
+    }, state.token);
+    state.selectedMarket = valueOf(state.assistantAnswer, "Market", "market") || market;
+    state.selectedSymbol = valueOf(state.assistantAnswer, "Symbol", "symbol") || symbol;
+    state.message = "股票助手已完成分析。";
   } catch (error) {
     state.message = error.message;
   }

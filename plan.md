@@ -44,6 +44,7 @@
 21. [20 Persistent Data MCP Research Premium UI](</Users/youngking/Documents/jijin/plans/20-persistent-data-mcp-research-premium-ui.plan.md>)
 22. [21 Portfolio Workbench UX](</Users/youngking/Documents/jijin/plans/21-portfolio-workbench-ux.plan.md>)
 23. [22 Portfolio Analysis Research RAG](</Users/youngking/Documents/jijin/plans/22-portfolio-analysis-research-rag.plan.md>)
+24. [23 Multi-Agent Research Assistant](</Users/youngking/Documents/jijin/plans/23-multi-agent-research-assistant.plan.md>)
 
 ## Global Testing Rule
 

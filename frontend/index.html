@@ -197,7 +197,7 @@
       input, select, button {
         font: inherit;
       }
-      input, select {
+      input, select, textarea {
         min-height: 38px;
         border: 1px solid var(--line);
         border-radius: 7px;
@@ -205,6 +205,10 @@
         background: var(--panel-2);
         color: var(--text);
         min-width: 0;
+      }
+      textarea {
+        padding: 10px;
+        resize: vertical;
       }
       button {
         min-height: 36px;
@@ -410,6 +414,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="./src/main.js?v=23"></script>
+    <script type="module" src="./src/main.js?v=24"></script>
   </body>
 </html>
