@@ -2,8 +2,10 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .analyzer import analyze
+from .chat_assistant import chat
 from .config import load_config
 from .health import health_payload
+from .langgraph_workflow import run_research_workflow
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -21,7 +23,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def do_POST(self):
-        if self.path != "/analyze":
+        if self.path not in {"/analyze", "/workflow/research", "/assistant/chat"}:
             self.send_response(404)
             self.end_headers()
             return
@@ -29,7 +31,13 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         try:
             payload = json.loads(raw.decode("utf-8"))
-            result = analyze(payload)
+            cfg = load_config()
+            if self.path == "/analyze":
+                result = analyze(payload)
+            elif self.path == "/workflow/research":
+                result = run_research_workflow(payload, cfg)
+            else:
+                result = chat(payload, cfg)
             body = json.dumps(result).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

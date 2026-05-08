@@ -44,10 +44,13 @@ export JIJIN_BACKEND_CONFIG=config/backend.local.json
 
 Use a licensed vendor or account-safe read-only integration before production use.
 
-DeepSeek is configured by provider/model plus an environment variable name:
+DeepSeek is configured by provider/model plus an environment variable name. The Python agent uses the task-specific model fields for routing:
 
 - `llm.provider`: `deepseek`
 - `llm.model`: `deepseek-chat`
+- `llm.chat_model`: `deepseek-chat` for dialogue and synthesis
+- `llm.flash_model`: `deepseek-v4-flash` for lightweight collection/crawling tasks
+- `llm.pro_model`: `deepseek-v4-pro` for risk review and heavier reasoning tasks
 - `llm.api_key_env`: `DEEPSEEK_API_KEY`
 
 Do not put the actual key in any JSON file. Set it in the shell or server secret manager:

@@ -1,8 +1,11 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=24";
-import { deleteJSON, getJSON, postJSON } from "./api.js?v=24";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=24";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=25";
+import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=25";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=25";
 
 const root = document.querySelector("#app");
+const STOCK_DETAIL_COOLDOWN_MS = 5 * 60 * 1000;
+const assistantSessionID = window.localStorage.getItem("jijin_assistant_session") || `chat-${Date.now().toString(36)}`;
+window.localStorage.setItem("jijin_assistant_session", assistantSessionID);
 const state = {
   token: window.localStorage.getItem("jijin_token") || "",
   email: window.localStorage.getItem("jijin_email") || "",
@@ -33,6 +36,10 @@ const state = {
   workflows: [],
   workflowResult: null,
   assistantAnswer: null,
+  assistantMessages: [],
+  assistantSessionID,
+  assistantStreaming: false,
+  quoteFetchedAt: {},
 };
 
 applyTheme();
@@ -477,6 +484,12 @@ function renderReportsView(view) {
 
 function renderAssistantView(view) {
   const targets = analysisTargets();
+  const messages = state.assistantMessages.map((message) => `
+    <div class="chat-message ${message.role}">
+      <span>${message.role === "user" ? "你" : "AI"}</span>
+      <p>${escapeHTML(message.content || "")}</p>
+    </div>
+  `).join("");
   const workflowRows = state.workflows.map((job) => {
     const steps = asArray(valueOf(job, "Steps", "steps"));
     return `<tr>
@@ -488,9 +501,12 @@ function renderAssistantView(view) {
     </tr>`;
   }).join("");
   return `
-    <section class="grid">
-      <article>
-        <h3>股票对话助手</h3>
+    <section class="assistant-layout">
+      <article class="assistant-config">
+        <div class="panel-title">
+          <h3>股票助手</h3>
+          <span class="safety-badge">多轮上下文</span>
+        </div>
         <label>从已有股票选择
           <select id="assistant-source">
             <option value="">手动输入</option>
@@ -498,18 +514,27 @@ function renderAssistantView(view) {
           </select>
         </label>
         ${renderStockPicker("assistant", false)}
-        <label>你的问题
-          <textarea id="assistant-question" rows="5" placeholder="例如：结合我的持仓成本和最近产品信息，分析一下这只股票需要关注什么风险。"></textarea>
+        <p class="muted">会话：${escapeHTML(state.assistantSessionID)}。回答会结合持仓、股票池、行情、产品信息和 RAG 历史。</p>
+        <div class="actions">
+          <button id="load-workflows-assistant" type="button">刷新工作流记录</button>
+          <button id="clear-assistant-chat" type="button">清空本页对话</button>
+        </div>
+      </article>
+      <article class="chat-panel">
+        <div class="panel-title">
+          <h3>${state.selectedMarket}:${state.selectedSymbol}</h3>
+          <span class="muted">${state.assistantStreaming ? "正在流式输出..." : "DeepSeek 路由分析"}</span>
+        </div>
+        <div class="chat-window" id="assistant-chat-window">
+          ${messages || `<div class="empty-chat">${view.empty}</div>`}
+        </div>
+        <label class="chat-composer">你的问题
+          <textarea id="assistant-question" rows="3" placeholder="例如：结合我的持仓成本、最近产品信息和历史 RAG，总结这只股票下一步重点关注什么。"></textarea>
         </label>
         <div class="actions">
-          <button id="ask-assistant" type="button">开始分析</button>
-          <button id="load-workflows-assistant" type="button">刷新工作流记录</button>
+          <button id="ask-assistant" type="button" ${state.assistantStreaming ? "disabled" : ""}>发送并分析</button>
         </div>
-        <p class="muted">${view.empty}</p>
-      </article>
-      <article>
-        <h3>助手回答</h3>
-        ${state.assistantAnswer ? `<p class="research-summary">${escapeHTML(valueOf(state.assistantAnswer, "Answer", "answer"))}</p><p class="muted">${escapeHTML(valueOf(state.assistantAnswer, "ContextSummary", "context_summary") || "")}</p>` : "<p>暂无回答。</p>"}
+        ${state.assistantAnswer ? `<p class="muted">${escapeHTML(valueOf(state.assistantAnswer, "ContextSummary", "context_summary") || "")}</p>` : ""}
       </article>
       <article class="wide">
         <h3>最近 AI 工作流</h3>
@@ -642,6 +667,11 @@ function bindViewActions() {
   document.querySelector("#analyze-holdings")?.addEventListener("click", refreshHoldings);
   document.querySelector("#assistant-source")?.addEventListener("change", fillAssistantFromSource);
   document.querySelector("#ask-assistant")?.addEventListener("click", askAssistant);
+  document.querySelector("#clear-assistant-chat")?.addEventListener("click", () => {
+    state.assistantMessages = [];
+    state.assistantAnswer = null;
+    render();
+  });
   document.querySelector("#load-workflows-assistant")?.addEventListener("click", () => loadWorkflows(true));
   document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
   document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
@@ -846,7 +876,7 @@ async function saveMonitorStock() {
   if (!form) return;
   try {
     await ensureDefaultWatchlist();
-    await collectStockInfoData(form.market, form.symbol);
+    await collectStockInfoData(form.market, form.symbol, { force: true });
     state.watchlist = await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, {
       market: form.market,
       symbol: form.symbol,
@@ -920,7 +950,7 @@ async function saveHolding() {
     await postJSON("/api/holdings", { user_id: state.userID, market, symbol, quantity, cost_basis: costBasis, attention_level: attentionLevel }, state.token);
     await ensureDefaultWatchlist();
     await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, { market, symbol }, state.token).catch(() => {});
-    await collectStockInfoData(market, symbol);
+    await collectStockInfoData(market, symbol, { force: true });
     await Promise.all([loadHoldings(false), loadWatchlists(false)]);
     state.message = `${market}:${symbol} 持仓已保存，并已加入当前股票池。`;
   } catch (error) {
@@ -1047,7 +1077,7 @@ async function refreshHoldings() {
   try {
     if (!state.holdings.length) await loadHoldings(false);
     for (const item of state.holdings) {
-      await collectStockInfoData(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol"));
+      await collectStockInfoData(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol"), { force: true });
     }
     state.message = state.holdings.length ? `已刷新 ${state.holdings.length} 条持仓行情。` : "暂无持仓可刷新。";
   } catch (error) {
@@ -1091,13 +1121,13 @@ async function markNotificationRead(id) {
 
 async function collectStockInfoFromForm() {
   const form = readStockForm("stock");
-  if (form) await collectStockInfo(form.market, form.symbol);
+  if (form) await collectStockInfo(form.market, form.symbol, { force: true });
 }
 
 async function collectReportMarket() {
   const form = readStockForm("analysis");
   if (!form) return;
-  await collectStockInfo(form.market, form.symbol);
+  await collectStockInfo(form.market, form.symbol, { force: true });
 }
 
 async function collectResearchForCurrentStock() {
@@ -1151,33 +1181,93 @@ async function askAssistant() {
     render();
     return;
   }
+  state.assistantMessages.push({ role: "user", content: question });
+  state.assistantMessages.push({ role: "assistant", content: "" });
+  state.assistantStreaming = true;
+  state.message = "股票助手正在流式分析。";
+  render();
   try {
-    state.assistantAnswer = await postJSON("/api/assistant/chat", {
+    state.assistantAnswer = await streamAssistantChat({
       user_id: state.userID,
+      session_id: state.assistantSessionID,
       market,
       symbol,
       question,
-    }, state.token);
+    });
     state.selectedMarket = valueOf(state.assistantAnswer, "Market", "market") || market;
     state.selectedSymbol = valueOf(state.assistantAnswer, "Symbol", "symbol") || symbol;
     state.message = "股票助手已完成分析。";
   } catch (error) {
     state.message = error.message;
+    const last = state.assistantMessages[state.assistantMessages.length - 1];
+    if (last?.role === "assistant" && !last.content) last.content = `分析失败：${error.message}`;
+  } finally {
+    state.assistantStreaming = false;
   }
   render();
 }
 
-async function collectStockInfo(market, symbol) {
+async function streamAssistantChat(payload) {
+  const response = await fetch(`${API_BASE}/api/assistant/chat/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-ID": `web-${Date.now()}`,
+      ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    if (shouldInvalidateSession(data, response.status)) {
+      window.localStorage.removeItem("jijin_token");
+      throw new Error("登录已过期，请重新登录。");
+    }
+    throw new Error(data?.error?.message || `HTTP ${response.status}`);
+  }
+  if (!response.body) {
+    return await postJSON("/api/assistant/chat", payload, state.token);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() || "";
+    for (const event of events) {
+      const line = event.split("\n").find((item) => item.startsWith("data:"));
+      if (!line) continue;
+      const data = JSON.parse(line.slice(5).trim());
+      if (data.delta) {
+        const last = state.assistantMessages[state.assistantMessages.length - 1];
+        if (last?.role === "assistant") last.content += data.delta;
+        render();
+      }
+      if (data.done) {
+        finalResponse = data.response;
+      }
+    }
+  }
+  return finalResponse || { market: payload.market, symbol: payload.symbol, answer: state.assistantMessages.at(-1)?.content || "" };
+}
+
+async function collectStockInfo(market, symbol, options = {}) {
   try {
-    await collectStockInfoData(market, symbol);
-    state.message = `已获取 ${market}:${symbol} 行情和公司信息。`;
+    const result = await collectStockInfoData(market, symbol, options);
+    state.message = result.cached
+      ? `${market}:${symbol} 已使用 ${Math.ceil(STOCK_DETAIL_COOLDOWN_MS / 60000)} 分钟内缓存，避免频繁请求数据源。`
+      : `已获取 ${market}:${symbol} 行情和公司信息。`;
   } catch (error) {
     state.message = error.message;
   }
   render();
 }
 
-async function collectStockInfoData(market, symbol) {
+async function collectStockInfoData(market, symbol, options = {}) {
   const normalizedMarket = String(market || "CN").trim().toUpperCase();
   const normalizedSymbol = String(symbol || "").trim().toUpperCase();
   if (!normalizedSymbol) throw new Error("请输入股票代码。");
@@ -1185,13 +1275,21 @@ async function collectStockInfoData(market, symbol) {
   state.selectedSymbol = normalizedSymbol;
   window.localStorage.setItem("jijin_selected_market", normalizedMarket);
   window.localStorage.setItem("jijin_selected_symbol", normalizedSymbol);
+  const key = stockKey(normalizedMarket, normalizedSymbol);
+  const fetchedAt = state.quoteFetchedAt[key] || 0;
+  if (!options.force && state.quoteByKey[key] && Date.now() - fetchedAt < STOCK_DETAIL_COOLDOWN_MS) {
+    await loadMarketAnalysisData();
+    return { cached: true };
+  }
   const data = await postJSON("/api/market/collect", { market: normalizedMarket, symbol: normalizedSymbol }, state.token);
   state.collected = data.snapshot || data.Snapshot;
-  state.quoteByKey[stockKey(normalizedMarket, normalizedSymbol)] = state.collected;
+  state.quoteByKey[key] = state.collected;
+  state.quoteFetchedAt[key] = Date.now();
   state.snapshots = asArray(await getJSON(`/api/market/snapshots?market=${encodeURIComponent(normalizedMarket)}&symbol=${encodeURIComponent(normalizedSymbol)}`, state.token));
   state.dailyChanges = asArray(data.daily_changes || data.DailyChanges);
   state.profile = data.profile || data.Profile || null;
-  state.profileByKey[stockKey(normalizedMarket, normalizedSymbol)] = state.profile;
+  state.profileByKey[key] = state.profile;
+  return { cached: false };
 }
 
 async function loadMarketAnalysis() {

@@ -45,6 +45,7 @@
 22. [21 Portfolio Workbench UX](</Users/youngking/Documents/jijin/plans/21-portfolio-workbench-ux.plan.md>)
 23. [22 Portfolio Analysis Research RAG](</Users/youngking/Documents/jijin/plans/22-portfolio-analysis-research-rag.plan.md>)
 24. [23 Multi-Agent Research Assistant](</Users/youngking/Documents/jijin/plans/23-multi-agent-research-assistant.plan.md>)
+25. [24 LangGraph Agent Chat UX](</Users/youngking/Documents/jijin/plans/24-langgraph-agent-chat-ux.plan.md>)
 
 ## Global Testing Rule
 

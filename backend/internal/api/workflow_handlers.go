@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"jijin/backend/internal/agentclient"
 	"jijin/backend/internal/holdings"
 	"jijin/backend/internal/marketdata"
 	"jijin/backend/internal/persistence"
@@ -148,6 +149,9 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	profile := marketdata.ProfileFromSnapshots(target.Market, target.Symbol, snapshots)
 	latest := latestSnapshotForWorkflow(snapshots)
 	interval := holdings.AttentionRefreshInterval(target.AttentionLevel)
+	if document, steps, ok := s.runAgentResearchTarget(r, jobID, userID, target, profile, latest, len(snapshots), interval); ok {
+		return document, steps
+	}
 	collectorOutput := fmt.Sprintf("%s:%s 行情样本 %d 条，产品 %s。", target.Market, target.Symbol, len(snapshots), strings.Join(profile.Products, "、"))
 	summary := workflowSummary(profile, latest, target.AttentionLevel, interval)
 	review := "风险审查：输出仅用于研究和提醒，不作为买卖指令；需结合公告、财报和个人仓位人工确认。"
@@ -188,6 +192,82 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	return document, steps
 }
 
+func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID string, target workflowTarget, profile marketdata.CompanyProfile, latest marketdata.Snapshot, snapshotsCount int, interval time.Duration) (persistence.RAGDocument, []persistence.WorkflowStep, bool) {
+	if strings.TrimSpace(s.cfg.AgentURL) == "" {
+		return persistence.RAGDocument{}, nil, false
+	}
+	ctx := r.Context()
+	client := agentclient.NewClient(strings.TrimRight(s.cfg.AgentURL, "/"))
+	result, err := client.RunWorkflow(ctx, agentclient.WorkflowRequest{
+		UserID:         userID,
+		JobID:          jobID,
+		Market:         target.Market,
+		Symbol:         target.Symbol,
+		AttentionLevel: target.AttentionLevel,
+		Interval:       interval.String(),
+		Profile:        mapFromJSON(profile),
+		LatestSnapshot: mapFromJSON(latest),
+		SnapshotsCount: snapshotsCount,
+	})
+	if err != nil {
+		return persistence.RAGDocument{}, nil, false
+	}
+	metadata := map[string]string{}
+	for key, value := range result.Metadata {
+		metadata[key] = value
+	}
+	metadata["agent_engine"] = result.Engine
+	metadata["workflow_job_id"] = jobID
+	if _, ok := metadata["embedding_status"]; !ok {
+		metadata["embedding_status"] = "indexed"
+	}
+	content := strings.TrimSpace(result.Content)
+	if content == "" {
+		content = workflowSummary(profile, latest, target.AttentionLevel, interval)
+	}
+	document := persistence.RAGDocument{
+		ID:         "rag-" + shortHash(userID+target.Market+target.Symbol+time.Now().UTC().Format(time.RFC3339Nano)),
+		UserID:     userID,
+		Market:     target.Market,
+		Symbol:     target.Symbol,
+		SourceType: "langgraph_agent_workflow",
+		SourceID:   jobID,
+		Content:    content,
+		Metadata:   metadata,
+		Embedding:  localEmbedding(content),
+		CreatedAt:  time.Now().UTC(),
+	}
+	if s.store != nil {
+		_ = s.store.SaveRAGDocument(document)
+	}
+	steps := make([]persistence.WorkflowStep, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		started := parseAgentTime(step.StartedAt)
+		completed := parseAgentTime(step.CompletedAt)
+		output := step.OutputSummary
+		if strings.TrimSpace(step.Model) != "" {
+			output = output + " [模型: " + step.Model + "; 引擎: " + result.Engine + "]"
+		}
+		steps = append(steps, persistence.WorkflowStep{
+			ID:            jobID + ":" + target.Market + ":" + target.Symbol + ":" + step.StepName,
+			JobID:         jobID,
+			StepName:      step.StepName,
+			AgentName:     step.AgentName,
+			Status:        step.Status,
+			InputSummary:  step.InputSummary,
+			OutputSummary: output,
+			StartedAt:     started,
+			CompletedAt:   completed,
+		})
+	}
+	if s.store != nil {
+		for _, step := range steps {
+			_ = s.store.SaveWorkflowStep(step)
+		}
+	}
+	return document, steps, true
+}
+
 func workflowStep(jobID string, target workflowTarget, name string, agentName string, input string, output string, at time.Time) persistence.WorkflowStep {
 	return persistence.WorkflowStep{
 		ID:            jobID + ":" + target.Market + ":" + target.Symbol + ":" + name,
@@ -219,6 +299,23 @@ func latestSnapshotForWorkflow(snapshots []marketdata.Snapshot) marketdata.Snaps
 		}
 	}
 	return latest
+}
+
+func mapFromJSON(value interface{}) map[string]interface{} {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	out := map[string]interface{}{}
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+func parseAgentTime(value string) time.Time {
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed
+	}
+	return time.Now().UTC()
 }
 
 func localEmbedding(text string) []float64 {
@@ -263,18 +360,21 @@ func attentionLabel(level string) string {
 }
 
 type assistantChatRequest struct {
-	UserID   string `json:"user_id"`
-	Market   string `json:"market"`
-	Symbol   string `json:"symbol"`
-	Question string `json:"question"`
+	UserID    string `json:"user_id"`
+	SessionID string `json:"session_id"`
+	Market    string `json:"market"`
+	Symbol    string `json:"symbol"`
+	Question  string `json:"question"`
 }
 
 type assistantChatResponse struct {
 	Market         string   `json:"market"`
 	Symbol         string   `json:"symbol"`
+	SessionID      string   `json:"session_id"`
 	Answer         string   `json:"answer"`
 	ContextSummary string   `json:"context_summary"`
 	RAGDocumentIDs []string `json:"rag_document_ids"`
+	Model          string   `json:"model"`
 }
 
 func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +391,20 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 	if userID == "" || strings.TrimSpace(req.Symbol) == "" {
 		WriteError(w, http.StatusBadRequest, "validation_error", "user_id and symbol are required", requestID(r))
 		return
+	}
+	response, err := s.buildAssistantChatResponse(r, req)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "assistant_error", err.Error(), requestID(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRequest) (assistantChatResponse, error) {
+	userID := strings.TrimSpace(req.UserID)
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		sessionID = "default"
 	}
 	market, symbol := s.resolveAssistantTarget(userID, req.Market, req.Symbol)
 	snapshots := s.listSnapshots(market, symbol)
@@ -312,12 +426,37 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	contextSummary := assistantContextSummary(holding, inPool, len(ragDocs), len(snapshots))
+	history := []persistence.AssistantMessage{}
+	if s.store != nil {
+		if messages, err := s.store.ListAssistantMessages(userID, sessionID, market, symbol, 8); err == nil {
+			history = messages
+		}
+	}
 	answer := fmt.Sprintf("针对 %s:%s：%s。你问的是：%s。结合当前上下文：%s。RAG 参考：%s。结论：继续作为研究对象观察，重点核对产品/业务变化、价格波动和你的持仓成本；这不是买卖指令。",
 		market, symbol, profile.Analysis, strings.TrimSpace(req.Question), contextSummary, ragText)
+	model := "local-fallback"
+	if strings.TrimSpace(s.cfg.AgentURL) != "" {
+		client := agentclient.NewClient(strings.TrimRight(s.cfg.AgentURL, "/"))
+		if result, err := client.Chat(r.Context(), agentclient.ChatRequest{
+			UserID:         userID,
+			SessionID:      sessionID,
+			Market:         market,
+			Symbol:         symbol,
+			Question:       req.Question,
+			ContextSummary: contextSummary,
+			History:        assistantHistoryMaps(history),
+			RAGDocuments:   ragDocumentMaps(ragDocs),
+			Profile:        mapFromJSON(profile),
+		}); err == nil {
+			answer = result.Answer
+			model = result.Model
+		}
+	}
 	if s.store != nil {
 		_ = s.store.SaveAssistantMessage(persistence.AssistantMessage{
 			ID:             "chat-" + shortHash(userID+market+symbol+req.Question+time.Now().UTC().Format(time.RFC3339Nano)),
 			UserID:         userID,
+			SessionID:      sessionID,
 			Market:         market,
 			Symbol:         symbol,
 			Question:       req.Question,
@@ -327,7 +466,44 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:      time.Now().UTC(),
 		})
 	}
-	writeJSON(w, http.StatusOK, assistantChatResponse{Market: market, Symbol: symbol, Answer: answer, ContextSummary: contextSummary, RAGDocumentIDs: ragIDs})
+	return assistantChatResponse{Market: market, Symbol: symbol, SessionID: sessionID, Answer: answer, ContextSummary: contextSummary, RAGDocumentIDs: ragIDs, Model: model}, nil
+}
+
+func (s *Server) handleAssistantChatStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
+		return
+	}
+	var req assistantChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "validation_error", "Invalid JSON body.", requestID(r))
+		return
+	}
+	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.Symbol) == "" {
+		WriteError(w, http.StatusBadRequest, "validation_error", "user_id and symbol are required", requestID(r))
+		return
+	}
+	response, err := s.buildAssistantChatResponse(r, req)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "assistant_error", err.Error(), requestID(r))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, _ := w.(http.Flusher)
+	for _, chunk := range streamChunks(response.Answer, 18) {
+		payload, _ := json.Marshal(map[string]string{"delta": chunk})
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	final, _ := json.Marshal(map[string]interface{}{"done": true, "response": response})
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", final)
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
 
 func (s *Server) resolveAssistantTarget(userID string, market string, symbol string) (string, string) {
@@ -430,4 +606,47 @@ func assistantContextSummary(holding *holdings.Holding, inPool bool, ragCount in
 	parts = append(parts, "RAG 文档 "+strconv.Itoa(ragCount)+" 份")
 	parts = append(parts, "行情样本 "+strconv.Itoa(snapshotCount)+" 条")
 	return strings.Join(parts, "；")
+}
+
+func assistantHistoryMaps(messages []persistence.AssistantMessage) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(messages))
+	for _, message := range messages {
+		out = append(out, map[string]interface{}{
+			"question": message.Question,
+			"answer":   message.Answer,
+			"created":  message.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return out
+}
+
+func ragDocumentMaps(documents []persistence.RAGDocument) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(documents))
+	for _, document := range documents {
+		out = append(out, map[string]interface{}{
+			"id":      document.ID,
+			"content": document.Content,
+			"source":  document.SourceType,
+		})
+	}
+	return out
+}
+
+func streamChunks(text string, size int) []string {
+	if size <= 0 {
+		size = 24
+	}
+	runes := []rune(text)
+	chunks := []string{}
+	for start := 0; start < len(runes); start += size {
+		end := start + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[start:end]))
+	}
+	if len(chunks) == 0 {
+		return []string{""}
+	}
+	return chunks
 }

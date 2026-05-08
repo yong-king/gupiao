@@ -10,6 +10,9 @@
   "llm": {
     "provider": "deepseek",
     "model": "deepseek-chat",
+    "chat_model": "deepseek-chat",
+    "flash_model": "deepseek-v4-flash",
+    "pro_model": "deepseek-v4-pro",
     "api_key_env": "DEEPSEEK_API_KEY"
   },
   "repository": {

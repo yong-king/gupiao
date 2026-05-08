@@ -32,6 +32,40 @@ func TestClientAnalyzeRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestClientRunWorkflowSuccess(t *testing.T) {
+	client := NewClient("http://agent.local")
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/workflow/research" {
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+		}
+		return jsonResponse(`{"engine":"fallback-sequential","market":"CN","symbol":"000821","content":"ok","metadata":{"model_summarize":"deepseek-chat"},"steps":[{"step_name":"summarize","agent_name":"归纳整理 Agent","status":"succeeded","input_summary":"in","output_summary":"out","model":"deepseek-chat"}]}`), nil
+	})}
+	got, err := client.RunWorkflow(context.Background(), WorkflowRequest{UserID: "u1", Market: "CN", Symbol: "000821"})
+	if err != nil {
+		t.Fatalf("workflow: %v", err)
+	}
+	if got.Engine == "" || got.Steps[0].Model != "deepseek-chat" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+}
+
+func TestClientChatSuccess(t *testing.T) {
+	client := NewClient("http://agent.local")
+	client.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/assistant/chat" {
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+		}
+		return jsonResponse(`{"market":"CN","symbol":"000821","answer":"ok","model":"deepseek-chat"}`), nil
+	})}
+	got, err := client.Chat(context.Background(), ChatRequest{UserID: "u1", Market: "CN", Symbol: "000821", Question: "q"})
+	if err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if got.Answer != "ok" || got.Model != "deepseek-chat" {
+		t.Fatalf("unexpected result: %#v", got)
+	}
+}
+
 func TestRunRepositorySaveAndFind(t *testing.T) {
 	repo := NewRunRepository()
 	run := Run{ID: "run-1", AgentVersion: "test", PromptVersion: "v1", Status: "succeeded"}

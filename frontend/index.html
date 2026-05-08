@@ -103,6 +103,9 @@
       .content {
         padding: 28px;
         min-width: 0;
+        background:
+          linear-gradient(180deg, rgba(76, 201, 166, 0.08), transparent 260px),
+          radial-gradient(circle at top right, rgba(102, 166, 255, 0.16), transparent 360px);
       }
       .topbar,
       .view-header {
@@ -126,6 +129,10 @@
       }
       .view-header {
         margin: 18px 0 14px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--panel) 84%, transparent);
       }
       .safety-badge,
       .risk-badge,
@@ -162,8 +169,8 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
       }
       .wide {
         grid-column: 1 / -1;
@@ -174,6 +181,14 @@
         border-radius: 8px;
         padding: 18px;
         box-shadow: var(--shadow);
+        min-width: 0;
+      }
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
       }
       h1, h2, h3, p {
         margin-top: 0;
@@ -239,6 +254,10 @@
         width: 100%;
         border-collapse: collapse;
         font-size: 14px;
+        min-width: 620px;
+      }
+      article:has(.stock-table) {
+        overflow-x: auto;
       }
       .stock-table th,
       .stock-table td {
@@ -269,6 +288,67 @@
         border-left: 3px solid var(--accent);
         padding-left: 10px;
         color: var(--text);
+      }
+      .assistant-layout {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        gap: 16px;
+      }
+      .assistant-config,
+      .chat-panel {
+        min-height: 520px;
+      }
+      .chat-panel {
+        display: grid;
+        grid-template-rows: auto minmax(260px, 1fr) auto auto auto;
+      }
+      .chat-window {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        overflow: auto;
+        min-height: 300px;
+        max-height: 52vh;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(8, 17, 31, 0.3);
+      }
+      .chat-message {
+        width: min(760px, 88%);
+        display: grid;
+        gap: 5px;
+        padding: 11px 13px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-2);
+      }
+      .chat-message span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .chat-message p {
+        margin: 0;
+        line-height: 1.65;
+        white-space: pre-wrap;
+      }
+      .chat-message.user {
+        justify-self: end;
+        border-color: rgba(102, 166, 255, 0.34);
+        background: rgba(102, 166, 255, 0.12);
+      }
+      .chat-message.assistant {
+        justify-self: start;
+        border-color: rgba(76, 201, 166, 0.32);
+        background: rgba(76, 201, 166, 0.1);
+      }
+      .empty-chat {
+        color: var(--muted);
+        align-self: center;
+        justify-self: center;
+      }
+      .chat-composer textarea {
+        min-height: 88px;
       }
       .price-chart {
         width: 100%;
@@ -406,6 +486,13 @@
         .two-col {
           grid-template-columns: 1fr;
         }
+        .assistant-layout {
+          grid-template-columns: 1fr;
+        }
+        .assistant-config,
+        .chat-panel {
+          min-height: auto;
+        }
         .content {
           padding: 18px;
         }
@@ -414,6 +501,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="./src/main.js?v=24"></script>
+    <script type="module" src="./src/main.js?v=25"></script>
   </body>
 </html>

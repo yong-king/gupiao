@@ -69,6 +69,7 @@ type WorkflowStep struct {
 type AssistantMessage struct {
 	ID             string    `json:"id"`
 	UserID         string    `json:"user_id"`
+	SessionID      string    `json:"session_id"`
 	Market         string    `json:"market"`
 	Symbol         string    `json:"symbol"`
 	Question       string    `json:"question"`
@@ -653,12 +654,47 @@ func (s *Store) SaveAssistantMessage(message AssistantMessage) error {
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
 	}
+	if strings.TrimSpace(message.SessionID) == "" {
+		message.SessionID = "default"
+	}
 	ragIDs, err := json.Marshal(message.RAGDocumentIDs)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO stock_assistant_messages(id,user_id,market,symbol,question,answer,context_summary,rag_document_ids,created_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		message.ID, message.UserID, message.Market, message.Symbol, message.Question, message.Answer, message.ContextSummary, string(ragIDs), message.CreatedAt)
+	_, err = s.db.Exec(`INSERT INTO stock_assistant_messages(id,user_id,session_id,market,symbol,question,answer,context_summary,rag_document_ids,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		message.ID, message.UserID, message.SessionID, message.Market, message.Symbol, message.Question, message.Answer, message.ContextSummary, string(ragIDs), message.CreatedAt)
 	return err
+}
+
+func (s *Store) ListAssistantMessages(userID string, sessionID string, market string, symbol string, limit int) ([]AssistantMessage, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = "default"
+	}
+	rows, err := s.db.Query(`SELECT id,user_id,session_id,market,symbol,question,answer,context_summary,rag_document_ids,created_at
+		FROM stock_assistant_messages
+		WHERE user_id=$1 AND session_id=$2 AND market=$3 AND symbol=$4
+		ORDER BY created_at DESC
+		LIMIT $5`, userID, sessionID, market, symbol, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AssistantMessage{}
+	for rows.Next() {
+		var message AssistantMessage
+		var ragIDs string
+		if err := rows.Scan(&message.ID, &message.UserID, &message.SessionID, &message.Market, &message.Symbol, &message.Question, &message.Answer, &message.ContextSummary, &ragIDs, &message.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(ragIDs), &message.RAGDocumentIDs)
+		out = append(out, message)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
 }

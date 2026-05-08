@@ -23,9 +23,12 @@ type AuthConfig struct {
 }
 
 type LLMConfig struct {
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	APIKeyEnv string `json:"api_key_env"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	ChatModel  string `json:"chat_model"`
+	FlashModel string `json:"flash_model"`
+	ProModel   string `json:"pro_model"`
+	APIKeyEnv  string `json:"api_key_env"`
 }
 
 type RepoConfig struct {
@@ -52,9 +55,12 @@ func Default() Config {
 			SessionTTLMinutes: int((24 * time.Hour).Minutes()),
 		},
 		LLM: LLMConfig{
-			Provider:  "deepseek",
-			Model:     "deepseek-chat",
-			APIKeyEnv: "DEEPSEEK_API_KEY",
+			Provider:   "deepseek",
+			Model:      "deepseek-chat",
+			ChatModel:  "deepseek-chat",
+			FlashModel: "deepseek-v4-flash",
+			ProModel:   "deepseek-v4-pro",
+			APIKeyEnv:  "DEEPSEEK_API_KEY",
 		},
 		Repository: RepoConfig{
 			RemoteURL:       "",

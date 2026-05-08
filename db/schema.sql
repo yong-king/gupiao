@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS holdings (
     symbol TEXT NOT NULL,
     quantity NUMERIC NOT NULL,
     cost_basis NUMERIC NOT NULL,
+    attention_level TEXT NOT NULL DEFAULT 'medium',
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
@@ -224,6 +225,57 @@ CREATE TABLE IF NOT EXISTS llm_analysis_runs (
     created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS rag_vectors (
+    id TEXT PRIMARY KEY,
+    rag_document_id TEXT NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    embedding JSONB NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_workflow_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    workflow_type TEXT NOT NULL,
+    attention_level TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    target_count INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_workflow_steps (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES agent_workflow_jobs(id) ON DELETE CASCADE,
+    step_name TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    input_summary TEXT NOT NULL DEFAULT '',
+    output_summary TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stock_assistant_messages (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    session_id TEXT NOT NULL DEFAULT 'default',
+    market TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    context_summary TEXT NOT NULL DEFAULT '',
+    rag_document_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_watchlists_user_id ON watchlists(user_id);
 CREATE INDEX IF NOT EXISTS idx_holdings_user_id ON holdings(user_id);
 CREATE INDEX IF NOT EXISTS idx_price_snapshots_symbol_time ON price_snapshots(market, symbol, data_time DESC);
@@ -236,3 +288,8 @@ CREATE INDEX IF NOT EXISTS idx_analysis_reports_user_date ON analysis_reports(us
 CREATE INDEX IF NOT EXISTS idx_broker_accounts_user_id ON broker_accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_rag_documents_symbol_created ON rag_documents(market, symbol, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_analysis_runs_user_symbol ON llm_analysis_runs(user_id, market, symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rag_vectors_document ON rag_vectors(rag_document_id);
+CREATE INDEX IF NOT EXISTS idx_agent_workflow_jobs_user_created ON agent_workflow_jobs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_workflow_steps_job ON agent_workflow_steps(job_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_stock_assistant_messages_user_symbol ON stock_assistant_messages(user_id, market, symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_assistant_messages_session_symbol ON stock_assistant_messages(user_id, session_id, market, symbol, created_at DESC);

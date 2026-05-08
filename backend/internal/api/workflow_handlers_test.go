@@ -65,3 +65,24 @@ func TestAssistantChatUsesHoldingContext(t *testing.T) {
 		t.Fatalf("unexpected assistant response: %#v", payload)
 	}
 }
+
+func TestAssistantChatStreamEmitsChunks(t *testing.T) {
+	holdingRepo := holdings.NewRepository()
+	if _, err := holdingRepo.Upsert(holdings.Holding{UserID: "user-1", Market: "CN", Symbol: "000821", Quantity: 100, CostBasis: 8, AttentionLevel: "high"}); err != nil {
+		t.Fatalf("upsert holding: %v", err)
+	}
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdingRepo, refresh.NewService(marketdata.NewMockProvider(), marketdata.NewSnapshotRepository(), refresh.NewJobRepository()))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/assistant/chat/stream", strings.NewReader(`{"user_id":"user-1","session_id":"s1","symbol":"000821","question":"分析风险"}`))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/event-stream") {
+		t.Fatalf("expected event stream, got %q", contentType)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"delta"`) || !strings.Contains(body, `"done":true`) {
+		t.Fatalf("unexpected stream body: %s", body)
+	}
+}
