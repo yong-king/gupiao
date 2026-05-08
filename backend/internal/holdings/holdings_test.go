@@ -21,6 +21,9 @@ func TestParseCSVReturnsNormalizedHoldings(t *testing.T) {
 	if got[0].Market != "US" || got[0].Symbol != "AAPL" {
 		t.Fatalf("holding was not normalized: %#v", got[0])
 	}
+	if got[0].AttentionLevel != "medium" {
+		t.Fatalf("expected default attention level, got %#v", got[0])
+	}
 }
 
 func TestParseCSVReportsRowErrors(t *testing.T) {

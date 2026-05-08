@@ -145,6 +145,35 @@ func (r *Repository) AddSymbol(id string, symbol Symbol) error {
 	return nil
 }
 
+func (r *Repository) Delete(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.watchlist[id]; !ok {
+		return false
+	}
+	delete(r.watchlist, id)
+	return true
+}
+
+func (r *Repository) DeleteSymbol(id string, market string, symbol string) bool {
+	target := Symbol{Market: market, Symbol: symbol}.Normalized()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	w, ok := r.watchlist[id]
+	if !ok {
+		return false
+	}
+	for i, existing := range w.Symbols {
+		if existing.Key() == target.Key() {
+			w.Symbols = append(w.Symbols[:i], w.Symbols[i+1:]...)
+			w.UpdatedAt = time.Now().UTC()
+			r.watchlist[id] = copyWatchlist(w)
+			return true
+		}
+	}
+	return false
+}
+
 func replaceSymbol(symbols []Symbol, updated Symbol) []Symbol {
 	out := append([]Symbol(nil), symbols...)
 	for i, existing := range out {

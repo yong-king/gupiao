@@ -25,9 +25,10 @@ const (
 type RiskLevel string
 
 const (
-	RiskLow    RiskLevel = "low"
-	RiskMedium RiskLevel = "medium"
-	RiskHigh   RiskLevel = "high"
+	RiskLow      RiskLevel = "low"
+	RiskMedium   RiskLevel = "medium"
+	RiskHigh     RiskLevel = "high"
+	RiskCritical RiskLevel = "critical"
 )
 
 type RuleType string
@@ -125,6 +126,17 @@ func (r *RuleRepository) ListByUser(userID string) []Rule {
 		}
 	}
 	return out
+}
+
+func (r *RuleRepository) Delete(userID string, id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rule, ok := r.rules[id]
+	if !ok || rule.UserID != userID {
+		return false
+	}
+	delete(r.rules, id)
+	return true
 }
 
 type EventRepository struct {

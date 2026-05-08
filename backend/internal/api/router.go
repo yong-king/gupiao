@@ -139,6 +139,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/notifications/read", s.requireAuth(s.handleNotificationRead))
 	mux.HandleFunc("/api/accounts", s.requireAuth(s.handleAccounts))
 	mux.HandleFunc("/api/system/dependencies", s.requireAuth(s.handleSystemDependencies))
+	mux.HandleFunc("/api/research/collect", s.requireAuth(s.handleResearchCollect))
 	return withCORS(mux)
 }
 

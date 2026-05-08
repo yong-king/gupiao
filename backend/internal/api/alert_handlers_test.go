@@ -55,3 +55,32 @@ func TestAlertRuleTriggersAfterManualRefresh(t *testing.T) {
 		t.Fatalf("unexpected events: %#v", events)
 	}
 }
+
+func TestAlertRuleDeleteAPI(t *testing.T) {
+	server := NewServer(watchlist.NewRepository(), holdings.NewRepository())
+	ruleBody := `{"id":"rule-delete","user_id":"user-1","market":"US","symbol":"AAPL","type":"price_below","threshold":160,"signal":"buy_watch","risk_level":"high","enabled":true,"cooldown_seconds":1800}`
+	ruleReq := httptest.NewRequest(http.MethodPost, "/api/alert-rules", bytes.NewBufferString(ruleBody))
+	ruleRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(ruleRec, ruleReq)
+	if ruleRec.Code != http.StatusCreated {
+		t.Fatalf("expected rule status %d, got %d: %s", http.StatusCreated, ruleRec.Code, ruleRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/alert-rules?user_id=user-1&id=rule-delete", nil)
+	deleteRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete status %d, got %d: %s", http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/alert-rules?user_id=user-1", nil)
+	listRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(listRec, listReq)
+	var rules []alerts.Rule
+	if err := json.NewDecoder(listRec.Body).Decode(&rules); err != nil {
+		t.Fatalf("decode rules: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Fatalf("expected no rules, got %#v", rules)
+	}
+}

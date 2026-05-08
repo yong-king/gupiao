@@ -16,11 +16,12 @@ type importHoldingsRequest struct {
 }
 
 type upsertHoldingRequest struct {
-	UserID    string  `json:"user_id"`
-	Market    string  `json:"market"`
-	Symbol    string  `json:"symbol"`
-	Quantity  float64 `json:"quantity"`
-	CostBasis float64 `json:"cost_basis"`
+	UserID         string  `json:"user_id"`
+	Market         string  `json:"market"`
+	Symbol         string  `json:"symbol"`
+	Quantity       float64 `json:"quantity"`
+	CostBasis      float64 `json:"cost_basis"`
+	AttentionLevel string  `json:"attention_level"`
 }
 
 type importHoldingsResponse struct {
@@ -97,11 +98,12 @@ func (s *Server) handleHoldings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		input := holdings.Holding{
-			UserID:    req.UserID,
-			Market:    req.Market,
-			Symbol:    req.Symbol,
-			Quantity:  req.Quantity,
-			CostBasis: req.CostBasis,
+			UserID:         req.UserID,
+			Market:         req.Market,
+			Symbol:         req.Symbol,
+			Quantity:       req.Quantity,
+			CostBasis:      req.CostBasis,
+			AttentionLevel: req.AttentionLevel,
 		}
 		holding, err := s.holdings.Upsert(input)
 		if err != nil {

@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=22";
-import { deleteJSON, getJSON, postJSON } from "./api.js?v=22";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=22";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=23";
+import { deleteJSON, getJSON, postJSON } from "./api.js?v=23";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=23";
 
 const root = document.querySelector("#app");
 const state = {
@@ -29,6 +29,7 @@ const state = {
   profile: null,
   dependencies: null,
   accountConfigs: [],
+  researchResult: null,
 };
 
 applyTheme();
@@ -151,7 +152,25 @@ function renderWatchlistsView(view) {
       <article>
         <h3>我的股票池</h3>
         <div class="pill-row">${pools || `<p>${view.empty}</p>`}</div>
-        <button id="load-watchlists" type="button">刷新股票池</button>
+        <div class="actions">
+          <button id="load-watchlists" type="button">刷新股票池</button>
+          <button id="delete-watchlist" type="button">删除当前股票池</button>
+        </div>
+        <label>目标股票池
+          <select id="target-watchlist">
+            ${state.watchlists.filter((item) => itemID(item) !== state.selectedWatchlistID).map((item) => `<option value="${itemID(item)}">${escapeHTML(valueOf(item, "Name", "name") || itemID(item))}</option>`).join("")}
+          </select>
+        </label>
+        <label>合并来源股票池
+          <select id="merge-watchlist">
+            ${state.watchlists.filter((item) => itemID(item) !== state.selectedWatchlistID).map((item) => `<option value="${itemID(item)}">${escapeHTML(valueOf(item, "Name", "name") || itemID(item))}</option>`).join("")}
+          </select>
+        </label>
+        <div class="actions">
+          <button id="copy-stock" type="button">复制当前股票到目标池</button>
+          <button id="move-stock" type="button">移动当前股票到目标池</button>
+          <button id="merge-watchlists" type="button">合并来源池到当前池</button>
+        </div>
       </article>
       <article>
         <h3>加入当前股票池</h3>
@@ -189,10 +208,12 @@ function renderHoldingsView(view) {
     const quote = state.quoteByKey[stockKey(market, symbol)];
     const latest = Number(valueOf(quote, "Price", "price") || 0);
     const pnl = latest > 0 ? (latest - cost) * quantity : 0;
+    const attention = valueOf(item, "AttentionLevel", "attention_level") || "medium";
     return `<tr>
       <td><button class="link-button" data-load-stock="${stockKey(market, symbol)}" type="button">${market}:${symbol}</button></td>
       <td>${quantity}</td>
       <td>${cost.toFixed(2)}</td>
+      <td><span class="risk-badge risk-${attentionRisk(attention)}">${attentionLabel(attention)}</span></td>
       <td>${latest ? latest.toFixed(2) : "-"}</td>
       <td class="${pnl >= 0 ? "gain" : "loss"}">${latest ? pnl.toFixed(2) : "-"}</td>
       <td class="row-actions">
@@ -216,9 +237,17 @@ function renderHoldingsView(view) {
           <label>数量 <input id="holding-quantity" type="number" min="0" step="0.0001" placeholder="例如 1000" /></label>
           <label>成本价 <input id="holding-cost" type="number" min="0" step="0.01" placeholder="例如 8.20" /></label>
         </div>
+        <label>关注等级
+          <select id="holding-attention">
+            <option value="high">高：4 小时采集一次</option>
+            <option value="medium" selected>中：6 小时采集一次</option>
+            <option value="low">低：1 天采集一次</option>
+          </select>
+        </label>
         <div class="actions">
           <button id="save-holding" type="button">保存/更新持仓</button>
           <button id="load-holdings" type="button">刷新持仓</button>
+          <button id="collect-holding-research" type="button">采集并总结当前持仓信息</button>
         </div>
       </article>
       <article>
@@ -228,7 +257,7 @@ function renderHoldingsView(view) {
       </article>
       <article class="wide">
         <h3>当前持仓</h3>
-        ${state.holdings.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>数量</th><th>成本价</th><th>最新价</th><th>浮动盈亏</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>暂无持仓，先保存一条持仓。</p>"}
+          ${state.holdings.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>数量</th><th>成本价</th><th>关注等级</th><th>最新价</th><th>浮动盈亏</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>暂无持仓，先保存一条持仓。</p>"}
       </article>
     </section>
   `;
@@ -244,6 +273,7 @@ function renderRulesView(view) {
       <td>${signalLabel(valueOf(item, "Signal", "signal"))}</td>
       <td><span class="risk-badge risk-${risk}">${riskLabel(risk)}</span></td>
       <td>${valueOf(item, "Enabled", "enabled") === false ? "停用" : "启用"}</td>
+      <td><button data-delete-rule="${valueOf(item, "ID", "id")}" type="button">删除</button></td>
     </tr>`;
   }).join("");
   return `
@@ -295,7 +325,7 @@ function renderRulesView(view) {
       </article>
       <article class="wide">
         <h3>当前规则</h3>
-        ${state.rules.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>条件</th><th>阈值</th><th>信号</th><th>等级</th><th>状态</th></tr></thead><tbody>${rules}</tbody></table>` : `<p>${view.empty}</p>`}
+        ${state.rules.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>条件</th><th>阈值</th><th>信号</th><th>等级</th><th>状态</th><th>操作</th></tr></thead><tbody>${rules}</tbody></table>` : `<p>${view.empty}</p>`}
       </article>
     </section>
   `;
@@ -317,7 +347,7 @@ function renderRefreshView() {
       <article>
         <h3>刷新模式</h3>
         <select id="refresh-mode">${modes}</select>
-        <p class="muted">建议保守自动或手动刷新，避免高频访问数据源或外部账户。</p>
+        <p class="muted">后端默认自动刷新间隔为 30 分钟；手动刷新用于立即验证股票池或持仓数据。</p>
       </article>
       <article>
         <h3>最近保存行情</h3>
@@ -370,32 +400,43 @@ function renderAlertsView(view) {
 }
 
 function renderReportsView(view) {
-  const targets = analysisTargets();
-  const targetButtons = targets.map((item) => {
-    const key = stockKey(item.market, item.symbol);
-    return `<button class="pool-pill ${key === stockKey(state.selectedMarket, state.selectedSymbol) ? "active" : ""}" data-load-stock="${key}" type="button">${item.source} ${key}</button>`;
-  }).join("");
+  const selectedPoolSymbols = currentSymbols().map((item) => ({ market: valueOf(item, "Market", "market"), symbol: valueOf(item, "Symbol", "symbol"), source: "股票池" }));
+  const holdingRows = renderAnalysisRows(state.holdings.map((item) => ({
+    market: valueOf(item, "Market", "market"),
+    symbol: valueOf(item, "Symbol", "symbol"),
+    source: "持仓",
+    holding: item,
+  })));
+  const poolRows = renderAnalysisRows(selectedPoolSymbols);
   const changes = state.dailyChanges.map((item) => `<li>${formatDailyChange(item)}</li>`).join("");
   const latestSnapshot = state.snapshots[state.snapshots.length - 1] || state.collected;
   const latestChange = state.dailyChanges[state.dailyChanges.length - 1];
+  const holding = findHolding(state.selectedMarket, state.selectedSymbol);
   return `
     <section class="grid">
       <article class="wide">
-        <h3>分析股票</h3>
-        <div class="pill-row">${targetButtons || `<p>${view.empty}</p>`}</div>
+        <h3>持仓股票今日涨跌</h3>
+        ${holdingRows || `<p>${view.empty}</p>`}
+        <button id="analyze-holdings" type="button">刷新持仓今日涨跌</button>
+      </article>
+      <article class="wide">
+        <h3>股票池分析</h3>
+        <p class="muted">当前股票池：${currentWatchlistName()}</p>
+        <div class="pill-row">${state.watchlists.map((item) => `<button class="pool-pill ${itemID(item) === state.selectedWatchlistID ? "active" : ""}" data-select-watchlist="${itemID(item)}" type="button">${escapeHTML(valueOf(item, "Name", "name") || itemID(item))}</button>`).join("")}</div>
+        ${poolRows || "<p>当前股票池还没有股票。</p>"}
         <div class="inline-form">
           ${renderStockPicker("analysis", false)}
           <button id="collect-report-market" type="button">采集并分析当前股票</button>
           <button id="load-market-analysis" type="button">加载已保存分析</button>
+          <button id="collect-research" type="button">采集产品信息并生成 RAG 总结</button>
         </div>
       </article>
       <article>
-        <h3>持仓分析</h3>
-        <p>${portfolioSummary()}</p>
-        <button id="analyze-holdings" type="button">刷新持仓行情</button>
+        <h3>个人持仓情况</h3>
+        <p>${holding ? holdingSummary(holding) : "当前选中股票不在持仓中，可继续作为自选股票分析。"}</p>
       </article>
       <article>
-        <h3>自选分析</h3>
+        <h3>详细曲线</h3>
         <p class="market-number">${summarizeMarketNumbers(latestSnapshot, latestChange)}</p>
         ${renderPriceChart(state.snapshots)}
       </article>
@@ -412,6 +453,7 @@ function renderReportsView(view) {
         <h3>公司和产品情况</h3>
         <p>${state.profile ? summarizeProfile(state.profile) : "尚未加载公司/产品分析。"}</p>
         <p>${state.profile ? valueOf(state.profile, "analysis", "Analysis") : "点击采集后展示业务、产品和趋势归纳。"}</p>
+        ${state.researchResult ? `<p class="research-summary">${state.researchResult.summary || state.researchResult.Summary}</p>` : ""}
         <p class="muted">${state.profile ? valueOf(state.profile, "disclaimer", "Disclaimer") : "仅用于监控和研究，不构成投资建议。"}</p>
       </article>
     </section>
@@ -506,6 +548,10 @@ function renderSettingsView(view) {
 
 function bindViewActions() {
   document.querySelector("#create-watchlist")?.addEventListener("click", createWatchlistFromForm);
+  document.querySelector("#delete-watchlist")?.addEventListener("click", deleteCurrentWatchlist);
+  document.querySelector("#copy-stock")?.addEventListener("click", () => transferCurrentStock(false));
+  document.querySelector("#move-stock")?.addEventListener("click", () => transferCurrentStock(true));
+  document.querySelector("#merge-watchlists")?.addEventListener("click", mergeWatchlists);
   document.querySelectorAll("[data-select-watchlist]").forEach((button) => button.addEventListener("click", () => selectWatchlist(button.dataset.selectWatchlist)));
   document.querySelector("#lookup-stock")?.addEventListener("click", collectStockInfoFromForm);
   document.querySelector("#save-monitor-stock")?.addEventListener("click", saveMonitorStock);
@@ -517,11 +563,13 @@ function bindViewActions() {
   document.querySelector("#holding-source")?.addEventListener("change", fillHoldingFromSource);
   document.querySelector("#save-holding")?.addEventListener("click", saveHolding);
   document.querySelector("#load-holdings")?.addEventListener("click", () => loadHoldings(true));
+  document.querySelector("#collect-holding-research")?.addEventListener("click", collectResearchForCurrentStock);
   document.querySelectorAll("[data-edit-holding]").forEach((button) => button.addEventListener("click", () => fillHoldingForm(button.dataset.editHolding)));
   document.querySelectorAll("[data-delete-holding]").forEach((button) => button.addEventListener("click", () => deleteHolding(button.dataset.deleteHolding)));
   document.querySelector("#rule-source")?.addEventListener("change", fillRuleFromSource);
   document.querySelector("#save-rule")?.addEventListener("click", saveRuleFromForm);
   document.querySelector("#load-rules")?.addEventListener("click", () => loadRules(true));
+  document.querySelectorAll("[data-delete-rule]").forEach((button) => button.addEventListener("click", () => deleteRule(button.dataset.deleteRule)));
   document.querySelector("#refresh-current-pool")?.addEventListener("click", refreshCurrentPool);
   document.querySelector("#refresh-holdings")?.addEventListener("click", refreshHoldings);
   document.querySelector("#run-alert-check")?.addEventListener("click", runAlertCheck);
@@ -529,6 +577,7 @@ function bindViewActions() {
   document.querySelectorAll("[data-read-notification]").forEach((button) => button.addEventListener("click", () => markNotificationRead(button.dataset.readNotification)));
   document.querySelector("#collect-report-market")?.addEventListener("click", collectReportMarket);
   document.querySelector("#load-market-analysis")?.addEventListener("click", loadMarketAnalysis);
+  document.querySelector("#collect-research")?.addEventListener("click", collectResearchForCurrentStock);
   document.querySelector("#analyze-holdings")?.addEventListener("click", refreshHoldings);
   document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
   document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
@@ -614,6 +663,82 @@ async function selectWatchlist(id) {
     window.localStorage.setItem("jijin_selected_watchlist", id);
     state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(id)}`, state.token);
     state.message = `已切换到股票池「${currentWatchlistName()}」。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function deleteCurrentWatchlist() {
+  if (!state.selectedWatchlistID) {
+    state.message = "请先选择要删除的股票池。";
+    render();
+    return;
+  }
+  try {
+    await deleteJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.selectedWatchlistID = "";
+    window.localStorage.removeItem("jijin_selected_watchlist");
+    await loadWatchlists(false);
+    await ensureDefaultWatchlist();
+    state.message = "股票池已删除。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function transferCurrentStock(move) {
+  const targetID = document.querySelector("#target-watchlist")?.value || "";
+  if (!targetID) {
+    state.message = "请先选择目标股票池。";
+    render();
+    return;
+  }
+  try {
+    const symbol = currentSymbols().find((item) => stockKey(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol")) === stockKey(state.selectedMarket, state.selectedSymbol)) || {
+      market: state.selectedMarket,
+      symbol: state.selectedSymbol,
+    };
+    await postJSON(`/api/watchlists/${encodeURIComponent(targetID)}/symbols`, {
+      market: valueOf(symbol, "Market", "market"),
+      symbol: valueOf(symbol, "Symbol", "symbol"),
+      buy_price: valueOf(symbol, "BuyPrice", "buy_price") || 0,
+      sell_price: valueOf(symbol, "SellPrice", "sell_price") || 0,
+    }, state.token);
+    if (move) {
+      await deleteJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols?market=${encodeURIComponent(state.selectedMarket)}&symbol=${encodeURIComponent(state.selectedSymbol)}`, state.token).catch(() => {});
+    }
+    await loadWatchlists(false);
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token).catch(() => state.watchlist);
+    state.message = `${state.selectedMarket}:${state.selectedSymbol} 已${move ? "移动" : "复制"}到目标股票池。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function mergeWatchlists() {
+  const sourceID = document.querySelector("#merge-watchlist")?.value || "";
+  if (!sourceID || !state.selectedWatchlistID) {
+    state.message = "请选择要合并的来源股票池。";
+    render();
+    return;
+  }
+  try {
+    const source = await getJSON(`/api/watchlists/${encodeURIComponent(sourceID)}`, state.token);
+    const symbols = source.Symbols || source.symbols || [];
+    for (const item of symbols) {
+      await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, {
+        market: valueOf(item, "Market", "market"),
+        symbol: valueOf(item, "Symbol", "symbol"),
+        buy_price: valueOf(item, "BuyPrice", "buy_price") || 0,
+        sell_price: valueOf(item, "SellPrice", "sell_price") || 0,
+      }, state.token);
+    }
+    await loadWatchlists(false);
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token);
+    state.message = `已合并 ${symbols.length} 只股票到当前股票池。`;
   } catch (error) {
     state.message = error.message;
   }
@@ -721,13 +846,14 @@ async function saveHolding() {
   const symbol = (document.querySelector("#holding-symbol")?.value || "").trim().toUpperCase();
   const quantity = Number(document.querySelector("#holding-quantity")?.value || 0);
   const costBasis = Number(document.querySelector("#holding-cost")?.value || 0);
+  const attentionLevel = document.querySelector("#holding-attention")?.value || "medium";
   if (!symbol || quantity <= 0 || costBasis < 0) {
     state.message = "请填写有效的股票代码、数量和成本价。";
     render();
     return;
   }
   try {
-    await postJSON("/api/holdings", { user_id: state.userID, market, symbol, quantity, cost_basis: costBasis }, state.token);
+    await postJSON("/api/holdings", { user_id: state.userID, market, symbol, quantity, cost_basis: costBasis, attention_level: attentionLevel }, state.token);
     await ensureDefaultWatchlist();
     await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, { market, symbol }, state.token).catch(() => {});
     await collectStockInfoData(market, symbol);
@@ -758,6 +884,7 @@ function fillHoldingForm(key) {
   setInput("#holding-symbol", symbol);
   setInput("#holding-quantity", valueOf(item, "Quantity", "quantity") || "");
   setInput("#holding-cost", valueOf(item, "CostBasis", "cost_basis") || "");
+  setInput("#holding-attention", valueOf(item, "AttentionLevel", "attention_level") || "medium");
 }
 
 function fillHoldingFromSource() {
@@ -804,6 +931,17 @@ async function saveRuleFromForm() {
     }, state.token);
     await loadRules(false);
     state.message = `${market}:${symbol} ${riskLabel(riskLevel)}提醒规则已保存。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function deleteRule(id) {
+  try {
+    await deleteJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}&id=${encodeURIComponent(id)}`, state.token);
+    await loadRules(false);
+    state.message = "提醒规则已删除。";
   } catch (error) {
     state.message = error.message;
   }
@@ -891,6 +1029,23 @@ async function collectReportMarket() {
   const form = readStockForm("analysis");
   if (!form) return;
   await collectStockInfo(form.market, form.symbol);
+}
+
+async function collectResearchForCurrentStock() {
+  const holding = findHolding(state.selectedMarket, state.selectedSymbol);
+  const attentionLevel = document.querySelector("#holding-attention")?.value || valueOf(holding, "AttentionLevel", "attention_level") || "medium";
+  try {
+    state.researchResult = await postJSON("/api/research/collect", {
+      user_id: state.userID,
+      market: state.selectedMarket,
+      symbol: state.selectedSymbol,
+      attention_level: attentionLevel,
+    }, state.token);
+    state.message = `${state.selectedMarket}:${state.selectedSymbol} 产品信息总结已保存为 RAG 文档。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
 }
 
 async function collectStockInfo(market, symbol) {
@@ -1051,6 +1206,42 @@ function analysisTargets() {
   return uniqueStocks([...holdingTargets, ...allPoolSymbols(), { market: state.selectedMarket, symbol: state.selectedSymbol, source: "当前" }]);
 }
 
+function renderAnalysisRows(items) {
+  const rows = uniqueStocks(items).map((item) => {
+    const key = stockKey(item.market, item.symbol);
+    const quote = state.quoteByKey[key];
+    const percent = Number(valueOf(quote, "ChangePercent", "change_percent") || 0);
+    const cls = percent > 0 ? "cn-up" : percent < 0 ? "cn-down" : "muted";
+    const sign = percent > 0 ? "+" : "";
+    return `<tr>
+      <td><button class="link-button" data-load-stock="${key}" type="button">${key}</button></td>
+      <td>${item.source || "自选"}</td>
+      <td>${quote ? formatPrice(valueOf(quote, "Price", "price")) : "未刷新"}</td>
+      <td class="${cls}">${quote ? `${sign}${percent.toFixed(2)}%` : "-"}</td>
+      <td>${findHolding(item.market, item.symbol) ? holdingSummary(findHolding(item.market, item.symbol)) : "未持仓"}</td>
+    </tr>`;
+  }).join("");
+  if (!rows) return "";
+  return `<table class="stock-table"><thead><tr><th>代码</th><th>来源</th><th>最新价</th><th>今日涨跌</th><th>持仓情况</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function findHolding(market, symbol) {
+  const key = stockKey(market, symbol);
+  return state.holdings.find((item) => stockKey(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol")) === key);
+}
+
+function holdingSummary(item) {
+  const market = valueOf(item, "Market", "market");
+  const symbol = valueOf(item, "Symbol", "symbol");
+  const quantity = Number(valueOf(item, "Quantity", "quantity") || 0);
+  const cost = Number(valueOf(item, "CostBasis", "cost_basis") || 0);
+  const attention = valueOf(item, "AttentionLevel", "attention_level") || "medium";
+  const quote = state.quoteByKey[stockKey(market, symbol)];
+  const latest = Number(valueOf(quote, "Price", "price") || cost);
+  const pnl = (latest - cost) * quantity;
+  return `${quantity} 股，成本 ${cost.toFixed(2)}，关注${attentionLabel(attention)}，估算盈亏 ${pnl.toFixed(2)}`;
+}
+
 function uniqueStocks(items) {
   const map = new Map();
   for (const item of items) {
@@ -1128,6 +1319,14 @@ function signalLabel(signal) {
 
 function riskLabel(risk) {
   return { low: "低", medium: "中", high: "高", critical: "严重" }[risk] || risk || "低";
+}
+
+function attentionLabel(level) {
+  return { high: "高", medium: "中", low: "低" }[level] || "中";
+}
+
+function attentionRisk(level) {
+  return { high: "high", medium: "medium", low: "low" }[level] || "medium";
 }
 
 function applyTheme() {

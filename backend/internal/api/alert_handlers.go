@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"jijin/backend/internal/alerts"
@@ -58,6 +59,27 @@ func (s *Server) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, rule)
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, s.listAlertRules(r.URL.Query().Get("user_id")))
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.URL.Query().Get("id"))
+		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+		if id == "" || userID == "" {
+			WriteError(w, http.StatusBadRequest, "validation_error", "id and user_id are required", requestID(r))
+			return
+		}
+		deleted := s.alertRules.Delete(userID, id)
+		if s.store != nil {
+			var err error
+			deleted, err = s.store.DeleteAlertRule(userID, id)
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
+		if !deleted {
+			WriteError(w, http.StatusNotFound, "not_found", "Alert rule not found.", requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 	default:
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
 	}

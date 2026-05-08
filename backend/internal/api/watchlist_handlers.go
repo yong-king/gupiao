@@ -88,6 +88,28 @@ func (s *Server) handleWatchlistByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := parts[0]
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+		if userID == "" {
+			WriteError(w, http.StatusBadRequest, "validation_error", "user_id is required", requestID(r))
+			return
+		}
+		deleted := s.watchlists.Delete(id)
+		if s.store != nil {
+			var err error
+			deleted, err = s.store.DeleteWatchlist(userID, id)
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
+		if !deleted {
+			WriteError(w, http.StatusNotFound, "not_found", "Watchlist not found.", requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+		return
+	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		if s.store != nil {
 			if got, ok := s.store.FindWatchlistByID(id); ok {
@@ -152,6 +174,29 @@ func (s *Server) handleWatchlistByID(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 		writeJSON(w, http.StatusOK, got)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "symbols" && r.Method == http.MethodDelete {
+		market := r.URL.Query().Get("market")
+		symbol := r.URL.Query().Get("symbol")
+		if strings.TrimSpace(market) == "" || strings.TrimSpace(symbol) == "" {
+			WriteError(w, http.StatusBadRequest, "validation_error", "market and symbol are required", requestID(r))
+			return
+		}
+		deleted := s.watchlists.DeleteSymbol(id, market, symbol)
+		if s.store != nil {
+			var err error
+			deleted, err = s.store.DeleteWatchlistSymbol(id, market, symbol)
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
+		if !deleted {
+			WriteError(w, http.StatusNotFound, "not_found", "Watchlist symbol not found.", requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 		return
 	}
 

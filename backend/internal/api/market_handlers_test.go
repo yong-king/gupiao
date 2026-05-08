@@ -64,3 +64,28 @@ func TestMarketCollectAPI(t *testing.T) {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 }
+
+func TestResearchCollectAPI(t *testing.T) {
+	snapshots := marketdata.NewSnapshotRepository()
+	if err := snapshots.SaveAll([]marketdata.Snapshot{{
+		Market: "CN", Symbol: "000821", Name: "京山轻机", Open: 10, Price: 10.5, PreviousClose: 10, ChangePercent: 5, Source: "test", DataTime: time.Date(2026, 5, 8, 15, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+	service := refresh.NewService(marketdata.NewMockProvider(), snapshots, refresh.NewJobRepository())
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdings.NewRepository(), service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/research/collect", strings.NewReader(`{"user_id":"user-1","market":"CN","symbol":"000821","attention_level":"high"}`))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var payload collectResearchResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode research response: %v", err)
+	}
+	if payload.AttentionLevel != "high" || !strings.Contains(payload.Summary, "4h0m0s") {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}

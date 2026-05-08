@@ -15,19 +15,21 @@ import (
 )
 
 type Holding struct {
-	ID        string
-	UserID    string
-	Market    string
-	Symbol    string
-	Quantity  float64
-	CostBasis float64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	UserID         string
+	Market         string
+	Symbol         string
+	Quantity       float64
+	CostBasis      float64
+	AttentionLevel string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (h Holding) Normalized() Holding {
 	h.Market = strings.ToUpper(strings.TrimSpace(h.Market))
 	h.Symbol = watchlist.NormalizeSymbol(h.Symbol)
+	h.AttentionLevel = NormalizeAttentionLevel(h.AttentionLevel)
 	return h
 }
 
@@ -48,7 +50,34 @@ func (h Holding) Validate() error {
 	if normalized.CostBasis < 0 {
 		return errors.New("cost basis must not be negative")
 	}
+	switch normalized.AttentionLevel {
+	case "low", "medium", "high":
+	default:
+		return errors.New("attention level must be low, medium or high")
+	}
 	return nil
+}
+
+func NormalizeAttentionLevel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "high":
+		return "high"
+	case "low":
+		return "low"
+	default:
+		return "medium"
+	}
+}
+
+func AttentionRefreshInterval(level string) time.Duration {
+	switch NormalizeAttentionLevel(level) {
+	case "high":
+		return 4 * time.Hour
+	case "low":
+		return 24 * time.Hour
+	default:
+		return 6 * time.Hour
+	}
 }
 
 type RowError struct {
@@ -100,7 +129,10 @@ func ParseCSV(userID string, reader io.Reader) ([]Holding, []RowError, error) {
 
 func parseRecord(userID string, record []string, index map[string]int) (Holding, error) {
 	value := func(name string) string {
-		i := index[name]
+		i, ok := index[name]
+		if !ok {
+			return ""
+		}
 		if i >= len(record) {
 			return ""
 		}
@@ -117,11 +149,12 @@ func parseRecord(userID string, record []string, index map[string]int) (Holding,
 	}
 
 	holding := Holding{
-		UserID:    userID,
-		Market:    value("market"),
-		Symbol:    value("symbol"),
-		Quantity:  quantity,
-		CostBasis: costBasis,
+		UserID:         userID,
+		Market:         value("market"),
+		Symbol:         value("symbol"),
+		Quantity:       quantity,
+		CostBasis:      costBasis,
+		AttentionLevel: value("attention_level"),
 	}
 	if err := holding.Validate(); err != nil {
 		return Holding{}, err

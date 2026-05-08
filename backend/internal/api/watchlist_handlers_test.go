@@ -54,6 +54,20 @@ func TestWatchlistAPIFlow(t *testing.T) {
 	if audits := server.AuditEntries(); len(audits) != 2 {
 		t.Fatalf("expected 2 audit entries, got %d", len(audits))
 	}
+
+	deleteSymbolReq := httptest.NewRequest(http.MethodDelete, "/api/watchlists/wl-1/symbols?market=US&symbol=AAPL", nil)
+	deleteSymbolRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deleteSymbolRec, deleteSymbolReq)
+	if deleteSymbolRec.Code != http.StatusOK {
+		t.Fatalf("expected delete symbol status %d, got %d: %s", http.StatusOK, deleteSymbolRec.Code, deleteSymbolRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/watchlists/wl-1?user_id=user-1", nil)
+	deleteRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete watchlist status %d, got %d: %s", http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+	}
 }
 
 func TestHoldingsImportAPI(t *testing.T) {
@@ -85,7 +99,7 @@ func TestHoldingsImportAPI(t *testing.T) {
 
 func TestHoldingsUpsertAPI(t *testing.T) {
 	server := NewServer(watchlist.NewRepository(), holdings.NewRepository())
-	body := `{"user_id":"user-1","market":"US","symbol":"AAPL","quantity":10,"cost_basis":150}`
+	body := `{"user_id":"user-1","market":"US","symbol":"AAPL","quantity":10,"cost_basis":150,"attention_level":"high"}`
 
 	req := httptest.NewRequest(http.MethodPost, "/api/holdings", bytes.NewBufferString(body))
 	rec := httptest.NewRecorder()
@@ -104,7 +118,7 @@ func TestHoldingsUpsertAPI(t *testing.T) {
 	if err := json.NewDecoder(listRec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode holdings: %v", err)
 	}
-	if len(got) != 1 || got[0].Symbol != "AAPL" || got[0].Quantity != 10 {
+	if len(got) != 1 || got[0].Symbol != "AAPL" || got[0].Quantity != 10 || got[0].AttentionLevel != "high" {
 		t.Fatalf("unexpected holdings: %#v", got)
 	}
 

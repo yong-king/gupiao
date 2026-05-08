@@ -24,6 +24,18 @@ type Store struct {
 	db *sql.DB
 }
 
+type RAGDocument struct {
+	ID         string
+	UserID     string
+	Market     string
+	Symbol     string
+	SourceType string
+	SourceID   string
+	Content    string
+	Metadata   map[string]string
+	CreatedAt  time.Time
+}
+
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("database url is required")
@@ -172,6 +184,39 @@ func (s *Store) ListWatchlistSymbols(watchlistID string) ([]watchlist.Symbol, er
 	return out, rows.Err()
 }
 
+func (s *Store) DeleteWatchlist(userID string, id string) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM watchlist_symbols WHERE watchlist_id=$1`, id); err != nil {
+		return false, err
+	}
+	result, err := tx.Exec(`DELETE FROM watchlists WHERE id=$1 AND user_id=$2`, id, userID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, tx.Commit()
+}
+
+func (s *Store) DeleteWatchlistSymbol(watchlistID string, market string, symbol string) (bool, error) {
+	target := watchlist.Symbol{Market: market, Symbol: symbol}.Normalized()
+	result, err := s.db.Exec(`DELETE FROM watchlist_symbols WHERE watchlist_id=$1 AND market=$2 AND symbol=$3`, watchlistID, target.Market, target.Symbol)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 func (s *Store) UpsertHolding(item holdings.Holding) (holdings.Holding, error) {
 	item = item.Normalized()
 	now := time.Now().UTC()
@@ -179,10 +224,10 @@ func (s *Store) UpsertHolding(item holdings.Holding) (holdings.Holding, error) {
 		item.CreatedAt = now
 	}
 	id := item.UserID + ":" + item.Market + ":" + item.Symbol
-	_, err := s.db.Exec(`INSERT INTO holdings(id,user_id,market,symbol,quantity,cost_basis,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-		ON CONFLICT (id) DO UPDATE SET quantity=EXCLUDED.quantity,cost_basis=EXCLUDED.cost_basis,updated_at=EXCLUDED.updated_at`,
-		id, item.UserID, item.Market, item.Symbol, item.Quantity, item.CostBasis, item.CreatedAt, now)
+	_, err := s.db.Exec(`INSERT INTO holdings(id,user_id,market,symbol,quantity,cost_basis,attention_level,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO UPDATE SET quantity=EXCLUDED.quantity,cost_basis=EXCLUDED.cost_basis,attention_level=EXCLUDED.attention_level,updated_at=EXCLUDED.updated_at`,
+		id, item.UserID, item.Market, item.Symbol, item.Quantity, item.CostBasis, item.AttentionLevel, item.CreatedAt, now)
 	return item, err
 }
 
@@ -199,8 +244,8 @@ func (s *Store) ReplaceHoldingsForUser(userID string, items []holdings.Holding) 
 	for _, item := range items {
 		item = item.Normalized()
 		id := userID + ":" + item.Market + ":" + item.Symbol
-		if _, err := tx.Exec(`INSERT INTO holdings(id,user_id,market,symbol,quantity,cost_basis,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-			id, userID, item.Market, item.Symbol, item.Quantity, item.CostBasis, now, now); err != nil {
+		if _, err := tx.Exec(`INSERT INTO holdings(id,user_id,market,symbol,quantity,cost_basis,attention_level,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			id, userID, item.Market, item.Symbol, item.Quantity, item.CostBasis, item.AttentionLevel, now, now); err != nil {
 			return err
 		}
 	}
@@ -208,7 +253,7 @@ func (s *Store) ReplaceHoldingsForUser(userID string, items []holdings.Holding) 
 }
 
 func (s *Store) ListHoldingsByUser(userID string) ([]holdings.Holding, error) {
-	rows, err := s.db.Query(`SELECT id,user_id,market,symbol,quantity,cost_basis,created_at,updated_at FROM holdings WHERE user_id=$1 ORDER BY updated_at DESC`, userID)
+	rows, err := s.db.Query(`SELECT id,user_id,market,symbol,quantity,cost_basis,attention_level,created_at,updated_at FROM holdings WHERE user_id=$1 ORDER BY updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +261,7 @@ func (s *Store) ListHoldingsByUser(userID string) ([]holdings.Holding, error) {
 	var out []holdings.Holding
 	for rows.Next() {
 		var item holdings.Holding
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Market, &item.Symbol, &item.Quantity, &item.CostBasis, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Market, &item.Symbol, &item.Quantity, &item.CostBasis, &item.AttentionLevel, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -271,6 +316,18 @@ func (s *Store) ListAlertRulesByUser(userID string) ([]alerts.Rule, error) {
 		out = append(out, rule)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) DeleteAlertRule(userID string, id string) (bool, error) {
+	result, err := s.db.Exec(`DELETE FROM alert_rules WHERE id=$1 AND user_id=$2`, id, userID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func (s *Store) SaveAlertEvent(event alerts.Event) error {
@@ -409,4 +466,36 @@ func (s *Store) ListSnapshots(market string, symbol string) ([]marketdata.Snapsh
 		out = append(out, snapshot)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) SaveRAGDocument(document RAGDocument) error {
+	if document.CreatedAt.IsZero() {
+		document.CreatedAt = time.Now().UTC()
+	}
+	if document.Metadata == nil {
+		document.Metadata = map[string]string{}
+	}
+	metadata, err := json.Marshal(document.Metadata)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO rag_documents(id,user_id,market,symbol,source_type,source_id,content,metadata,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content,metadata=EXCLUDED.metadata`,
+		document.ID, document.UserID, document.Market, document.Symbol, document.SourceType, document.SourceID, document.Content, string(metadata), document.CreatedAt); err != nil {
+		return err
+	}
+	vectorID := document.ID + ":vector"
+	if _, err := tx.Exec(`INSERT INTO rag_vectors(id,rag_document_id,provider,model,embedding,status,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status`,
+		vectorID, document.ID, "local", "pending-embedding", "[]", "pending_embedding", document.CreatedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
