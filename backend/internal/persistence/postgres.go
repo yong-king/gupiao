@@ -126,7 +126,7 @@ func (s *Store) ListWatchlistsByUser(userID string) ([]watchlist.Watchlist, erro
 		return nil, err
 	}
 	defer rows.Close()
-	var out []watchlist.Watchlist
+	out := []watchlist.Watchlist{}
 	for rows.Next() {
 		var w watchlist.Watchlist
 		if err := rows.Scan(&w.ID, &w.UserID, &w.Name, &w.CreatedAt, &w.UpdatedAt); err != nil {
@@ -173,7 +173,7 @@ func (s *Store) ListWatchlistSymbols(watchlistID string) ([]watchlist.Symbol, er
 		return nil, err
 	}
 	defer rows.Close()
-	var out []watchlist.Symbol
+	out := []watchlist.Symbol{}
 	for rows.Next() {
 		var symbol watchlist.Symbol
 		if err := rows.Scan(&symbol.Market, &symbol.Symbol, &symbol.Note, &symbol.BuyPrice, &symbol.SellPrice); err != nil {
@@ -258,7 +258,7 @@ func (s *Store) ListHoldingsByUser(userID string) ([]holdings.Holding, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []holdings.Holding
+	out := []holdings.Holding{}
 	for rows.Next() {
 		var item holdings.Holding
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Market, &item.Symbol, &item.Quantity, &item.CostBasis, &item.AttentionLevel, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -301,7 +301,7 @@ func (s *Store) ListAlertRulesByUser(userID string) ([]alerts.Rule, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []alerts.Rule
+	out := []alerts.Rule{}
 	for rows.Next() {
 		var rule alerts.Rule
 		var ruleType, signal, risk string
@@ -344,7 +344,7 @@ func (s *Store) ListAlertEventsByUser(userID string) ([]alerts.Event, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []alerts.Event
+	out := []alerts.Event{}
 	for rows.Next() {
 		var event alerts.Event
 		var signal, risk string
@@ -372,7 +372,7 @@ func (s *Store) ListNotificationsByUser(userID string) ([]notifications.Message,
 		return nil, err
 	}
 	defer rows.Close()
-	var out []notifications.Message
+	out := []notifications.Message{}
 	for rows.Next() {
 		var message notifications.Message
 		var signal, risk string
@@ -423,7 +423,7 @@ func (s *Store) ListAccountsByUser(userID string) ([]accounts.Config, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []accounts.Config
+	out := []accounts.Config{}
 	for rows.Next() {
 		var config accounts.Config
 		var mode string
@@ -457,7 +457,7 @@ func (s *Store) ListSnapshots(market string, symbol string) ([]marketdata.Snapsh
 		return nil, err
 	}
 	defer rows.Close()
-	var out []marketdata.Snapshot
+	out := []marketdata.Snapshot{}
 	for rows.Next() {
 		var snapshot marketdata.Snapshot
 		if err := rows.Scan(&snapshot.Market, &snapshot.Symbol, &snapshot.Name, &snapshot.Open, &snapshot.High, &snapshot.Low, &snapshot.Price, &snapshot.PreviousClose, &snapshot.ChangePercent, &snapshot.Volume, &snapshot.Source, &snapshot.DataTime, &snapshot.CreatedAt); err != nil {

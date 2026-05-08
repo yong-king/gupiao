@@ -766,7 +766,7 @@ async function ensureDefaultWatchlist() {
 
 async function loadWatchlists(showMessage) {
   try {
-    state.watchlists = await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.watchlists = asArray(await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token));
     if (state.selectedWatchlistID) {
       state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token).catch(() => state.watchlist);
     }
@@ -833,7 +833,7 @@ async function createPriceRules(form) {
 
 async function loadHoldings(showMessage) {
   try {
-    state.holdings = await getJSON(`/api/holdings?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.holdings = asArray(await getJSON(`/api/holdings?user_id=${encodeURIComponent(state.userID)}`, state.token));
     if (showMessage) state.message = `已加载 ${state.holdings.length} 条持仓。`;
   } catch (error) {
     state.message = error.message;
@@ -950,7 +950,7 @@ async function deleteRule(id) {
 
 async function loadRules(showMessage) {
   try {
-    state.rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.rules = asArray(await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token));
     if (showMessage) state.message = `已加载 ${state.rules.length} 条提醒规则。`;
   } catch (error) {
     state.message = error.message;
@@ -1000,8 +1000,8 @@ async function runAlertCheck() {
 
 async function loadAlerts(showMessage) {
   try {
-    state.alerts = await getJSON(`/api/alerts?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.notifications = await getJSON(`/api/notifications?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.alerts = asArray(await getJSON(`/api/alerts?user_id=${encodeURIComponent(state.userID)}`, state.token));
+    state.notifications = asArray(await getJSON(`/api/notifications?user_id=${encodeURIComponent(state.userID)}`, state.token));
     if (showMessage) state.message = "提醒中心已刷新。";
   } catch (error) {
     state.message = error.message;
@@ -1069,8 +1069,8 @@ async function collectStockInfoData(market, symbol) {
   const data = await postJSON("/api/market/collect", { market: normalizedMarket, symbol: normalizedSymbol }, state.token);
   state.collected = data.snapshot || data.Snapshot;
   state.quoteByKey[stockKey(normalizedMarket, normalizedSymbol)] = state.collected;
-  state.snapshots = await getJSON(`/api/market/snapshots?market=${encodeURIComponent(normalizedMarket)}&symbol=${encodeURIComponent(normalizedSymbol)}`, state.token);
-  state.dailyChanges = data.daily_changes || data.DailyChanges || [];
+  state.snapshots = asArray(await getJSON(`/api/market/snapshots?market=${encodeURIComponent(normalizedMarket)}&symbol=${encodeURIComponent(normalizedSymbol)}`, state.token));
+  state.dailyChanges = asArray(data.daily_changes || data.DailyChanges);
   state.profile = data.profile || data.Profile || null;
   state.profileByKey[stockKey(normalizedMarket, normalizedSymbol)] = state.profile;
 }
@@ -1088,8 +1088,8 @@ async function loadMarketAnalysis() {
 async function loadMarketAnalysisData() {
   const market = encodeURIComponent(state.selectedMarket);
   const symbol = encodeURIComponent(state.selectedSymbol);
-  state.snapshots = await getJSON(`/api/market/snapshots?market=${market}&symbol=${symbol}`, state.token);
-  state.dailyChanges = await getJSON(`/api/market/daily-changes?market=${market}&symbol=${symbol}`, state.token);
+  state.snapshots = asArray(await getJSON(`/api/market/snapshots?market=${market}&symbol=${symbol}`, state.token));
+  state.dailyChanges = asArray(await getJSON(`/api/market/daily-changes?market=${market}&symbol=${symbol}`, state.token));
   state.profile = await getJSON(`/api/stocks/profile?market=${market}&symbol=${symbol}`, state.token);
   state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] = state.profile;
 }
@@ -1119,7 +1119,7 @@ async function saveAccountConfig() {
 
 async function loadAccounts(showMessage) {
   try {
-    state.accountConfigs = await getJSON(`/api/accounts?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    state.accountConfigs = asArray(await getJSON(`/api/accounts?user_id=${encodeURIComponent(state.userID)}`, state.token));
     if (showMessage) state.message = `已加载 ${state.accountConfigs.length} 个账户配置。`;
   } catch (error) {
     state.message = error.message;
@@ -1184,7 +1184,7 @@ function readStockForm(prefix) {
 }
 
 function currentSymbols() {
-  return state.watchlist?.symbols || state.watchlist?.Symbols || [];
+  return asArray(state.watchlist?.symbols || state.watchlist?.Symbols);
 }
 
 function allPoolSymbols() {
@@ -1254,6 +1254,10 @@ function uniqueStocks(items) {
 
 function stockOptions(items) {
   return items.map((item) => `<option value="${stockKey(item.market, item.symbol)}">${item.source || "自选"} ${stockKey(item.market, item.symbol)}</option>`).join("");
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function portfolioSummary() {
