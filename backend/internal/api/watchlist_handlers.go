@@ -25,6 +25,15 @@ type addSymbolRequest struct {
 
 func (s *Server) handleWatchlists(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
+		if s.store != nil {
+			items, err := s.store.ListWatchlistsByUser(r.URL.Query().Get("user_id"))
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+			writeJSON(w, http.StatusOK, items)
+			return
+		}
 		writeJSON(w, http.StatusOK, s.watchlists.ListByUser(r.URL.Query().Get("user_id")))
 		return
 	}
@@ -47,6 +56,12 @@ func (s *Server) handleWatchlists(w http.ResponseWriter, r *http.Request) {
 	if err := s.watchlists.Save(watchlist); err != nil {
 		WriteError(w, http.StatusBadRequest, "validation_error", err.Error(), requestID(r))
 		return
+	}
+	if s.store != nil {
+		if err := s.store.SaveWatchlist(watchlist); err != nil {
+			WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+			return
+		}
 	}
 	s.audit(audit.Entry{
 		ID:        requestID(r) + ":watchlist.create",
@@ -74,6 +89,12 @@ func (s *Server) handleWatchlistByID(w http.ResponseWriter, r *http.Request) {
 
 	id := parts[0]
 	if len(parts) == 1 && r.Method == http.MethodGet {
+		if s.store != nil {
+			if got, ok := s.store.FindWatchlistByID(id); ok {
+				writeJSON(w, http.StatusOK, got)
+				return
+			}
+		}
 		got, ok := s.watchlists.FindByID(id)
 		if !ok {
 			WriteError(w, http.StatusNotFound, "not_found", "Watchlist not found.", requestID(r))
@@ -89,18 +110,34 @@ func (s *Server) handleWatchlistByID(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadRequest, "validation_error", "Invalid JSON body.", requestID(r))
 			return
 		}
-		err := s.watchlists.AddSymbol(id, watchlist.Symbol{
+		if s.store != nil {
+			if got, ok := s.store.FindWatchlistByID(id); ok {
+				_ = s.watchlists.Save(got)
+				for _, existing := range got.Symbols {
+					_ = s.watchlists.AddSymbol(id, existing)
+				}
+			}
+		}
+		symbol := watchlist.Symbol{
 			Market:    req.Market,
 			Symbol:    req.Symbol,
 			Note:      req.Note,
 			BuyPrice:  req.BuyPrice,
 			SellPrice: req.SellPrice,
-		})
+		}
+		err := s.watchlists.AddSymbol(id, symbol)
 		if err != nil {
 			WriteError(w, http.StatusBadRequest, "validation_error", err.Error(), requestID(r))
 			return
 		}
 		got, _ := s.watchlists.FindByID(id)
+		if s.store != nil {
+			if err := s.store.UpsertWatchlistSymbol(id, symbol); err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+			got, _ = s.store.FindWatchlistByID(id)
+		}
 		s.audit(audit.Entry{
 			ID:        requestID(r) + ":watchlist.symbol.add:" + symbolKey(req),
 			ActorID:   got.UserID,

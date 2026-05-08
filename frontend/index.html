@@ -5,116 +5,226 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>股票监控操作台</title>
     <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08111f;
+        --panel: #101b2d;
+        --panel-2: #15243a;
+        --text: #eef5ff;
+        --muted: #93a4ba;
+        --line: rgba(180, 202, 230, 0.16);
+        --accent: #4cc9a6;
+        --accent-2: #66a6ff;
+        --danger: #ff6b7a;
+        --warning: #ffd166;
+        --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #edf3f8;
+        --panel: #ffffff;
+        --panel-2: #f6f9fc;
+        --text: #142033;
+        --muted: #64748b;
+        --line: #d7e2ee;
+        --accent: #0f7a68;
+        --accent-2: #2563eb;
+        --danger: #c6283f;
+        --warning: #a16207;
+        --shadow: 0 16px 40px rgba(23, 37, 54, 0.1);
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #17202a;
-        background: #f6f8fa;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
       }
       #app {
         min-height: 100vh;
       }
       #app.app-shell {
         display: grid;
-        grid-template-columns: 220px 1fr;
+        grid-template-columns: 248px 1fr;
       }
       #app.auth-layout {
         display: grid;
         grid-template-columns: 1fr;
         place-items: center;
         padding: 24px;
-        box-sizing: border-box;
       }
       .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        background: #0b1524;
+        border-right: 1px solid var(--line);
+        padding: 22px 14px;
+      }
+      :root[data-theme="light"] .sidebar {
         background: #102033;
-        padding: 16px;
-        display: flex;
-        flex-direction: column;
+      }
+      .brand {
+        display: grid;
+        gap: 4px;
+        margin: 4px 8px 22px;
+      }
+      .brand strong {
+        font-size: 20px;
+        color: #ffffff;
+      }
+      .brand span {
+        color: #9fb4cc;
+        font-size: 13px;
+      }
+      nav {
+        display: grid;
         gap: 8px;
       }
       .sidebar button {
-        min-height: 36px;
-        border: 0;
-        border-radius: 6px;
-        background: #1d334d;
-        color: #fff;
+        min-height: 42px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: #d8e7f8;
         cursor: pointer;
         font-size: 15px;
         text-align: left;
-        padding: 8px 10px;
+        padding: 9px 12px;
       }
       .sidebar button.active,
       .sidebar button:hover {
-        background: #2f5f8f;
+        background: rgba(76, 201, 166, 0.14);
+        border-color: rgba(76, 201, 166, 0.28);
+        color: #ffffff;
       }
       .content {
-        padding: 24px;
+        padding: 28px;
+        min-width: 0;
       }
-      .topbar {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
-      }
-      .userbar {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-      }
+      .topbar,
       .view-header {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
         gap: 16px;
+      }
+      .topbar {
+        margin-bottom: 18px;
+      }
+      .userbar,
+      .actions,
+      .pill-row,
+      .row-actions,
+      .inline-form {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .view-header {
         margin: 18px 0 14px;
       }
-      .safety-badge {
-        border: 1px solid #a8c7e6;
+      .safety-badge,
+      .risk-badge,
+      .pool-pill {
         border-radius: 999px;
-        color: #1d4f7a;
-        background: #eaf4ff;
-        padding: 4px 10px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 6px 10px;
         white-space: nowrap;
       }
+      .safety-badge {
+        color: var(--accent);
+        border-color: rgba(76, 201, 166, 0.35);
+      }
+      .pool-pill.active {
+        border-color: var(--accent);
+        background: rgba(76, 201, 166, 0.16);
+      }
       .muted {
-        color: #657282;
+        color: var(--muted);
+      }
+      .status-line {
+        color: var(--muted);
+        min-height: 24px;
       }
       .code {
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        background: #f0f3f6;
-        border-radius: 6px;
-        padding: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 9px;
         overflow-wrap: anywhere;
-      }
-      .price-chart {
-        width: 100%;
-        height: 180px;
-        display: block;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-      }
-      .chart-grid {
-        fill: none;
-        stroke: #d8dee4;
-        stroke-width: 1;
-      }
-      .chart-line {
-        fill: none;
-        stroke: #1d7a5f;
-        stroke-width: 3;
-        stroke-linecap: round;
-        stroke-linejoin: round;
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
       }
       .wide {
         grid-column: 1 / -1;
+      }
+      article {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        box-shadow: var(--shadow);
+      }
+      h1, h2, h3, p {
+        margin-top: 0;
+      }
+      h1 {
+        margin-bottom: 6px;
+        font-size: 28px;
+      }
+      h2 {
+        margin-bottom: 8px;
+      }
+      h3 {
+        font-size: 16px;
+      }
+      label {
+        display: grid;
+        gap: 7px;
+        margin: 12px 0;
+        color: var(--muted);
+      }
+      input, select, button {
+        font: inherit;
+      }
+      input, select {
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 0 10px;
+        background: var(--panel-2);
+        color: var(--text);
+        min-width: 0;
+      }
+      button {
+        min-height: 36px;
+        border: 1px solid var(--line);
+        background: var(--panel-2);
+        color: var(--text);
+        border-radius: 7px;
+        padding: 0 11px;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .link-button {
+        padding: 0;
+        min-height: 0;
+        border: 0;
+        background: transparent;
+        color: var(--accent-2);
       }
       .two-col {
         display: grid;
@@ -128,10 +238,48 @@
       }
       .stock-table th,
       .stock-table td {
-        border-bottom: 1px solid #e2e8f0;
-        padding: 8px;
+        border-bottom: 1px solid var(--line);
+        padding: 9px;
         text-align: left;
         vertical-align: middle;
+      }
+      .stock-table th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .gain {
+        color: var(--accent);
+      }
+      .loss {
+        color: var(--danger);
+      }
+      .price-chart {
+        width: 100%;
+        height: 180px;
+        display: block;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .chart-grid {
+        fill: none;
+        stroke: rgba(148, 163, 184, 0.28);
+        stroke-width: 1;
+      }
+      .chart-line {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .chart-point {
+        fill: var(--accent);
+      }
+      .chart-value,
+      .market-number {
+        color: var(--accent);
+        font-weight: 700;
       }
       .change-calendar {
         display: grid;
@@ -140,72 +288,95 @@
       }
       .calendar-cell {
         min-height: 54px;
-        border: 1px solid #d8dee4;
-        border-radius: 6px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
         padding: 6px;
         display: grid;
         align-content: space-between;
-        background: #f8fafc;
+        background: var(--panel-2);
       }
       .calendar-cell span {
         font-size: 12px;
       }
       .calendar-cell.up {
-        background: #eaf8ef;
-        border-color: #b7dfc3;
-        color: #126437;
+        background: rgba(76, 201, 166, 0.14);
+        color: var(--accent);
       }
       .calendar-cell.down {
-        background: #fff0f0;
-        border-color: #efb4b4;
-        color: #9b1c1c;
+        background: rgba(255, 107, 122, 0.14);
+        color: var(--danger);
       }
-      article {
-        background: #fff;
-        border: 1px solid #d8dee4;
+      .alert-list,
+      .dependency-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 10px;
+      }
+      .alert-item {
+        border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 16px;
+        padding: 12px;
+        background: var(--panel-2);
       }
-      h1, h2, h3 {
-        margin-top: 0;
+      .risk-low {
+        color: var(--muted);
+      }
+      .risk-medium {
+        color: var(--warning);
+      }
+      .risk-high,
+      .risk-critical {
+        color: var(--danger);
+      }
+      .risk-card-high,
+      .risk-card-critical {
+        border-color: rgba(255, 107, 122, 0.45);
+        background: rgba(255, 107, 122, 0.1);
+      }
+      .risk-card-medium {
+        border-color: rgba(255, 209, 102, 0.35);
+        background: rgba(255, 209, 102, 0.08);
+      }
+      .dot {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        margin-right: 8px;
+      }
+      .dot.ok {
+        background: var(--accent);
+      }
+      .dot.bad {
+        background: var(--danger);
       }
       .auth {
-        width: min(420px, 100%);
+        width: min(430px, 100%);
       }
       .auth-card {
-        box-sizing: border-box;
-        background: #fff;
-        border: 1px solid #d8dee4;
+        background: var(--panel);
+        border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 20px;
+        padding: 24px;
+        box-shadow: var(--shadow);
       }
-      label {
-        display: grid;
-        gap: 6px;
-        margin: 12px 0;
-      }
-      input, select, button {
-        font: inherit;
-      }
-      button {
-        cursor: pointer;
-      }
-      input {
-        min-height: 34px;
-        border: 1px solid #c8d1dc;
-        border-radius: 6px;
-        padding: 0 8px;
-      }
-      .actions {
+      .inline-check {
         display: flex;
+        align-items: center;
         gap: 8px;
       }
-      @media (max-width: 700px) {
+      @media (max-width: 780px) {
         #app.app-shell {
           grid-template-columns: 1fr;
         }
         .sidebar {
-          flex-direction: row;
+          position: static;
+          height: auto;
+        }
+        nav {
+          display: flex;
           overflow-x: auto;
         }
         .sidebar button {
@@ -215,17 +386,17 @@
         .view-header {
           display: grid;
         }
-        .userbar {
-          justify-content: flex-start;
-        }
         .two-col {
           grid-template-columns: 1fr;
+        }
+        .content {
+          padding: 18px;
         }
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="./src/main.js?v=19"></script>
+    <script type="module" src="./src/main.js?v=22"></script>
   </body>
 </html>

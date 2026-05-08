@@ -15,6 +15,14 @@ type importHoldingsRequest struct {
 	CSV    string `json:"csv"`
 }
 
+type upsertHoldingRequest struct {
+	UserID    string  `json:"user_id"`
+	Market    string  `json:"market"`
+	Symbol    string  `json:"symbol"`
+	Quantity  float64 `json:"quantity"`
+	CostBasis float64 `json:"cost_basis"`
+}
+
 type importHoldingsResponse struct {
 	Imported  int                `json:"imported"`
 	RowErrors []string           `json:"row_errors"`
@@ -46,6 +54,12 @@ func (s *Server) handleHoldingsImport(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "validation_error", err.Error(), requestID(r))
 		return
 	}
+	if s.store != nil {
+		if err := s.store.ReplaceHoldingsForUser(req.UserID, parsed); err != nil {
+			WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+			return
+		}
+	}
 	s.audit(audit.Entry{
 		ID:        requestID(r) + ":holdings.import",
 		ActorID:   req.UserID,
@@ -68,14 +82,90 @@ func (s *Server) handleHoldingsImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, importHoldingsResponse{
 		Imported:  len(parsed),
 		RowErrors: errors,
-		Holdings:  s.holdings.ListByUser(req.UserID),
+		Holdings:  s.listHoldings(req.UserID),
 	})
 }
 
 func (s *Server) handleHoldings(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.listHoldings(r.URL.Query().Get("user_id")))
+	case http.MethodPost:
+		var req upsertHoldingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteError(w, http.StatusBadRequest, "validation_error", "Invalid JSON body.", requestID(r))
+			return
+		}
+		input := holdings.Holding{
+			UserID:    req.UserID,
+			Market:    req.Market,
+			Symbol:    req.Symbol,
+			Quantity:  req.Quantity,
+			CostBasis: req.CostBasis,
+		}
+		holding, err := s.holdings.Upsert(input)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "validation_error", err.Error(), requestID(r))
+			return
+		}
+		if s.store != nil {
+			holding, err = s.store.UpsertHolding(input)
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
+		s.audit(audit.Entry{
+			ID:        requestID(r) + ":holdings.upsert",
+			ActorID:   req.UserID,
+			Action:    "holdings.upsert",
+			Target:    "holding",
+			TargetID:  holding.Market + ":" + holding.Symbol,
+			RequestID: requestID(r),
+			Source:    "api",
+		})
+		writeJSON(w, http.StatusOK, holding)
+	case http.MethodDelete:
+		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+		market := strings.TrimSpace(r.URL.Query().Get("market"))
+		symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
+		if userID == "" || market == "" || symbol == "" {
+			WriteError(w, http.StatusBadRequest, "validation_error", "user_id, market and symbol are required", requestID(r))
+			return
+		}
+		deleted := s.holdings.Delete(userID, market, symbol)
+		if s.store != nil {
+			var err error
+			deleted, err = s.store.DeleteHolding(userID, market, symbol)
+			if err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
+		if !deleted {
+			WriteError(w, http.StatusNotFound, "not_found", "Holding not found.", requestID(r))
+			return
+		}
+		s.audit(audit.Entry{
+			ID:        requestID(r) + ":holdings.delete",
+			ActorID:   userID,
+			Action:    "holdings.delete",
+			Target:    "holding",
+			TargetID:  strings.ToUpper(market) + ":" + strings.ToUpper(symbol),
+			RequestID: requestID(r),
+			Source:    "api",
+		})
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	default:
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
-		return
 	}
-	writeJSON(w, http.StatusOK, s.holdings.ListByUser(r.URL.Query().Get("user_id")))
+}
+
+func (s *Server) listHoldings(userID string) []holdings.Holding {
+	if s.store != nil {
+		if items, err := s.store.ListHoldingsByUser(userID); err == nil {
+			return items
+		}
+	}
+	return s.holdings.ListByUser(userID)
 }

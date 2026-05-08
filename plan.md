@@ -40,6 +40,9 @@
 17. [16 Operable Console Persistence And DeepSeek Config](</Users/youngking/Documents/jijin/plans/16-operable-console-persistence-config.plan.md>)
 18. [17 Local Data And Repository Workflow](</Users/youngking/Documents/jijin/plans/17-local-data-and-repository-workflow.plan.md>)
 19. [18 Stock Entry Monitor Calendar](</Users/youngking/Documents/jijin/plans/18-stock-entry-monitor-calendar.plan.md>)
+20. [19 Operable Portfolio Alerts Accounts UI](</Users/youngking/Documents/jijin/plans/19-operable-portfolio-alerts-accounts-ui.plan.md>)
+21. [20 Persistent Data MCP Research Premium UI](</Users/youngking/Documents/jijin/plans/20-persistent-data-mcp-research-premium-ui.plan.md>)
+22. [21 Portfolio Workbench UX](</Users/youngking/Documents/jijin/plans/21-portfolio-workbench-ux.plan.md>)
 
 ## Global Testing Rule
 

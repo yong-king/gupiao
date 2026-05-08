@@ -32,6 +32,9 @@ func (s *Server) handleManualRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wl, ok := s.watchlists.FindByID(req.WatchlistID)
+	if !ok && s.store != nil {
+		wl, ok = s.store.FindWatchlistByID(req.WatchlistID)
+	}
 	if !ok {
 		WriteError(w, http.StatusNotFound, "not_found", "Watchlist not found.", requestID(r))
 		return
@@ -71,12 +74,15 @@ func (s *Server) handleManualRefresh(w http.ResponseWriter, r *http.Request) {
 			"status": string(job.Status),
 		},
 	})
+	if s.store != nil {
+		_ = s.store.SaveSnapshots(job.Snapshots)
+	}
 	s.evaluateAlerts(req.UserID, job.Snapshots)
 	writeJSON(w, http.StatusOK, job)
 }
 
 func (s *Server) evaluateAlerts(userID string, snapshots []marketdata.Snapshot) {
-	rules := s.alertRules.ListByUser(userID)
+	rules := s.listAlertRules(userID)
 	for _, snapshot := range snapshots {
 		for _, rule := range rules {
 			event, ok := alerts.Evaluate(rule, snapshot)
@@ -87,7 +93,12 @@ func (s *Server) evaluateAlerts(userID string, snapshots []marketdata.Snapshot) 
 			if !created {
 				continue
 			}
-			_ = s.notifier.Publish(notifications.FromEvent(createdEvent))
+			message := notifications.FromEvent(createdEvent)
+			if s.store != nil {
+				_ = s.store.SaveAlertEvent(createdEvent)
+				_ = s.store.SaveNotification(message)
+			}
+			_ = s.notifier.Publish(message)
 		}
 	}
 }

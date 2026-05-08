@@ -41,6 +41,9 @@ func (p *StooqProvider) FetchQuotes(ctx context.Context, requests []QuoteRequest
 }
 
 func (p *StooqProvider) FetchQuote(ctx context.Context, request QuoteRequest) (Snapshot, error) {
+	if strings.EqualFold(strings.TrimSpace(request.Market), "CN") {
+		return FetchEastmoneyQuote(ctx, request, p.client())
+	}
 	u, err := url.Parse(p.BaseURL)
 	if err != nil {
 		return Snapshot{}, err

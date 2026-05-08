@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=19";
-import { getJSON, postJSON } from "./api.js?v=19";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeProfile, valueOf } from "./market.js?v=19";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=22";
+import { deleteJSON, getJSON, postJSON } from "./api.js?v=22";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=22";
 
 const root = document.querySelector("#app");
 const state = {
@@ -8,28 +8,41 @@ const state = {
   email: window.localStorage.getItem("jijin_email") || "",
   userID: window.localStorage.getItem("jijin_user_id") || "user-demo",
   activeView: window.localStorage.getItem("jijin_active_view") || "watchlists",
+  selectedMarket: window.localStorage.getItem("jijin_selected_market") || "CN",
+  selectedSymbol: window.localStorage.getItem("jijin_selected_symbol") || "000821",
+  selectedWatchlistID: window.localStorage.getItem("jijin_selected_watchlist") || "",
+  theme: window.localStorage.getItem("jijin_theme") || "dark",
+  displayName: window.localStorage.getItem("jijin_display_name") || "",
   message: "",
   alerts: [],
   notifications: [],
   watchlists: [],
   watchlist: null,
-  selectedMarket: window.localStorage.getItem("jijin_selected_market") || "US",
-  selectedSymbol: window.localStorage.getItem("jijin_selected_symbol") || "AAPL",
   quoteByKey: {},
   profileByKey: {},
   holdings: [],
   rules: [],
-  rule: null,
-  holdingsImport: null,
   job: null,
   collected: null,
   snapshots: [],
   dailyChanges: [],
   profile: null,
   dependencies: null,
+  accountConfigs: [],
 };
 
+applyTheme();
+
+window.addEventListener("jijin-auth-expired", () => {
+  state.token = "";
+  state.email = "";
+  state.userID = "user-demo";
+  state.message = "登录已过期，请重新登录。";
+  render();
+});
+
 function render() {
+  applyTheme();
   if (!state.token) {
     renderAuth();
     return;
@@ -42,17 +55,26 @@ function render() {
     .map((item) => `<button class="${item.id === state.activeView ? "active" : ""}" data-view="${item.id}" type="button">${item.label}</button>`)
     .join("");
   root.innerHTML = `
-    <aside class="sidebar">${nav}</aside>
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>股票监控</strong>
+        <span>人工决策工作台</span>
+      </div>
+      <nav>${nav}</nav>
+    </aside>
     <main class="content">
       <section class="topbar">
-        <h1>股票监控操作台</h1>
+        <div>
+          <h1>投资监控工作台</h1>
+          <p class="muted">当前股票：${state.selectedMarket}:${state.selectedSymbol}</p>
+        </div>
         <div class="userbar">
-          <span class="muted">当前用户：${state.email}</span>
+          <span class="muted">${state.displayName || state.email}</span>
           <button id="logout" type="button">退出登录</button>
         </div>
       </section>
       ${renderActiveView()}
-      <p class="muted">${state.message}</p>
+      <p class="status-line">${state.message || " "}</p>
     </main>
   `;
   document.querySelectorAll("[data-view]").forEach((button) => {
@@ -64,9 +86,7 @@ function render() {
     });
   });
   document.querySelector("#logout").addEventListener("click", () => {
-    window.localStorage.removeItem("jijin_token");
-    window.localStorage.removeItem("jijin_email");
-    window.localStorage.removeItem("jijin_user_id");
+    ["jijin_token", "jijin_email", "jijin_user_id"].forEach((key) => window.localStorage.removeItem(key));
     state.token = "";
     state.userID = "user-demo";
     render();
@@ -82,237 +102,443 @@ function renderActiveView() {
         <h2>${view.title}</h2>
         <p class="muted">${view.description}</p>
       </div>
-      <span class="safety-badge">仅提醒，不自动交易</span>
+      <span class="safety-badge">只提醒，不自动交易</span>
     </section>
     ${renderViewBody(view)}
   `;
 }
 
 function renderViewBody(view) {
-  if (state.activeView === "watchlists") {
-    const symbols = state.watchlist?.symbols || state.watchlist?.Symbols || [];
-    const watchlists = state.watchlists.map((item) => `<li>${item.Name || item.name} (${item.ID || item.id})</li>`).join("");
-    const symbolRows = symbols.map((item) => {
-      const market = valueOf(item, "Market", "market");
-      const symbol = valueOf(item, "Symbol", "symbol");
-      const key = stockKey(market, symbol);
-      const quote = state.quoteByKey[key];
-      return `<tr>
-        <td>${market}:${symbol}</td>
-        <td>${formatPrice(valueOf(item, "BuyPrice", "buy_price"))}</td>
-        <td>${formatPrice(valueOf(item, "SellPrice", "sell_price"))}</td>
-        <td>${quote ? formatPrice(valueOf(quote, "Price", "price")) : "-"}</td>
-        <td>${monitorText(quote, item)}</td>
-        <td><button data-load-stock="${key}" type="button">获取</button></td>
-      </tr>`;
-    }).join("");
-    const selectedProfile = state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] || state.profile;
-    const selectedQuote = state.quoteByKey[stockKey(state.selectedMarket, state.selectedSymbol)] || state.collected;
-    return `
-      <section class="grid">
-        <article>
-          <h3>添加股票</h3>
-          <p>${state.watchlist ? `名称：${state.watchlist.name || state.watchlist.Name}` : view.empty}</p>
-          <label>市场
-            <select id="stock-market">
-              ${["US", "HK", "CN"].map((market) => `<option value="${market}" ${market === state.selectedMarket ? "selected" : ""}>${market}</option>`).join("")}
+  if (state.activeView === "watchlists") return renderWatchlistsView(view);
+  if (state.activeView === "holdings") return renderHoldingsView(view);
+  if (state.activeView === "rules") return renderRulesView(view);
+  if (state.activeView === "refresh") return renderRefreshView();
+  if (state.activeView === "alerts") return renderAlertsView(view);
+  if (state.activeView === "reports") return renderReportsView(view);
+  if (state.activeView === "accounts") return renderAccountsView();
+  return renderSettingsView(view);
+}
+
+function renderWatchlistsView(view) {
+  const symbols = currentSymbols();
+  const pools = state.watchlists.map((item) => {
+    const id = itemID(item);
+    const active = id === state.selectedWatchlistID ? "active" : "";
+    return `<button class="pool-pill ${active}" data-select-watchlist="${id}" type="button">${escapeHTML(valueOf(item, "Name", "name") || id)}</button>`;
+  }).join("");
+  const symbolRows = symbols.map((item) => {
+    const market = valueOf(item, "Market", "market");
+    const symbol = valueOf(item, "Symbol", "symbol");
+    const key = stockKey(market, symbol);
+    const quote = state.quoteByKey[key];
+    return `<tr>
+      <td><button class="link-button" data-load-stock="${key}" type="button">${market}:${symbol}</button></td>
+      <td>${formatPrice(valueOf(item, "BuyPrice", "buy_price"))}</td>
+      <td>${formatPrice(valueOf(item, "SellPrice", "sell_price"))}</td>
+      <td>${quote ? formatPrice(valueOf(quote, "Price", "price")) : "-"}</td>
+      <td>${monitorText(quote, item)}</td>
+    </tr>`;
+  }).join("");
+  const selectedProfile = state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] || state.profile;
+  const selectedQuote = state.quoteByKey[stockKey(state.selectedMarket, state.selectedSymbol)] || state.collected;
+  return `
+    <section class="grid">
+      <article>
+        <h3>新建股票池</h3>
+        <label>股票池名称 <input id="watchlist-name" placeholder="例如：短线观察、长期配置" /></label>
+        <button id="create-watchlist" type="button">新建股票池</button>
+      </article>
+      <article>
+        <h3>我的股票池</h3>
+        <div class="pill-row">${pools || `<p>${view.empty}</p>`}</div>
+        <button id="load-watchlists" type="button">刷新股票池</button>
+      </article>
+      <article>
+        <h3>加入当前股票池</h3>
+        <p class="muted">当前池：${currentWatchlistName()}</p>
+        ${renderStockPicker("stock", true)}
+        <div class="two-col">
+          <label>买入关注价 <input id="buy-price" type="number" min="0" step="0.01" placeholder="低于该价格提醒" /></label>
+          <label>卖出关注价 <input id="sell-price" type="number" min="0" step="0.01" placeholder="高于该价格提醒" /></label>
+        </div>
+        <div class="actions">
+          <button id="lookup-stock" type="button">获取股票信息</button>
+          <button id="save-monitor-stock" type="button">加入/更新监控</button>
+        </div>
+      </article>
+      <article>
+        <h3>股票信息</h3>
+        ${selectedQuote ? `<p class="market-number">${state.selectedMarket}:${state.selectedSymbol} 当前 ${formatPrice(valueOf(selectedQuote, "Price", "price"))}</p>` : "<p>输入股票代码后点击获取股票信息。</p>"}
+        <p>${selectedProfile ? summarizeProfile(selectedProfile) : "暂无公司和产品信息。"}</p>
+        <p class="muted">${selectedProfile ? valueOf(selectedProfile, "analysis", "Analysis") : "采集后会展示业务、产品和走势观察。"}</p>
+      </article>
+      <article class="wide">
+        <h3>当前池股票</h3>
+        ${symbols.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>买入关注</th><th>卖出关注</th><th>当前价</th><th>状态</th></tr></thead><tbody>${symbolRows}</tbody></table>` : `<p>${view.empty}</p>`}
+      </article>
+    </section>
+  `;
+}
+
+function renderHoldingsView(view) {
+  const rows = state.holdings.map((item) => {
+    const market = valueOf(item, "Market", "market");
+    const symbol = valueOf(item, "Symbol", "symbol");
+    const quantity = Number(valueOf(item, "Quantity", "quantity") || 0);
+    const cost = Number(valueOf(item, "CostBasis", "cost_basis") || 0);
+    const quote = state.quoteByKey[stockKey(market, symbol)];
+    const latest = Number(valueOf(quote, "Price", "price") || 0);
+    const pnl = latest > 0 ? (latest - cost) * quantity : 0;
+    return `<tr>
+      <td><button class="link-button" data-load-stock="${stockKey(market, symbol)}" type="button">${market}:${symbol}</button></td>
+      <td>${quantity}</td>
+      <td>${cost.toFixed(2)}</td>
+      <td>${latest ? latest.toFixed(2) : "-"}</td>
+      <td class="${pnl >= 0 ? "gain" : "loss"}">${latest ? pnl.toFixed(2) : "-"}</td>
+      <td class="row-actions">
+        <button data-edit-holding="${stockKey(market, symbol)}" type="button">修改</button>
+        <button data-delete-holding="${stockKey(market, symbol)}" type="button">删除</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>持仓配置</h3>
+        <label>从股票池选择
+          <select id="holding-source">
+            <option value="">手动输入</option>
+            ${stockOptions(allPoolSymbols())}
+          </select>
+        </label>
+        ${renderStockPicker("holding", false)}
+        <div class="two-col">
+          <label>数量 <input id="holding-quantity" type="number" min="0" step="0.0001" placeholder="例如 1000" /></label>
+          <label>成本价 <input id="holding-cost" type="number" min="0" step="0.01" placeholder="例如 8.20" /></label>
+        </div>
+        <div class="actions">
+          <button id="save-holding" type="button">保存/更新持仓</button>
+          <button id="load-holdings" type="button">刷新持仓</button>
+        </div>
+      </article>
+      <article>
+        <h3>持仓概览</h3>
+        <p>${state.holdings.length ? `当前 ${state.holdings.length} 条持仓。保存后会自动获取行情并加入分析目标。` : view.empty}</p>
+        <button id="analyze-holdings" type="button">刷新持仓行情并分析</button>
+      </article>
+      <article class="wide">
+        <h3>当前持仓</h3>
+        ${state.holdings.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>数量</th><th>成本价</th><th>最新价</th><th>浮动盈亏</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>` : "<p>暂无持仓，先保存一条持仓。</p>"}
+      </article>
+    </section>
+  `;
+}
+
+function renderRulesView(view) {
+  const rules = state.rules.map((item) => {
+    const risk = valueOf(item, "RiskLevel", "risk_level") || "low";
+    return `<tr>
+      <td>${valueOf(item, "Market", "market")}:${valueOf(item, "Symbol", "symbol")}</td>
+      <td>${ruleTypeLabel(valueOf(item, "Type", "type"))}</td>
+      <td>${formatPrice(valueOf(item, "Threshold", "threshold"))}</td>
+      <td>${signalLabel(valueOf(item, "Signal", "signal"))}</td>
+      <td><span class="risk-badge risk-${risk}">${riskLabel(risk)}</span></td>
+      <td>${valueOf(item, "Enabled", "enabled") === false ? "停用" : "启用"}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>提醒规则配置</h3>
+        <label>规则股票
+          <select id="rule-source">
+            <option value="">手动输入</option>
+            ${stockOptions(analysisTargets())}
+          </select>
+        </label>
+        ${renderStockPicker("rule", false)}
+        <label>触发条件
+          <select id="rule-type">
+            <option value="price_below">价格低于</option>
+            <option value="price_above">价格高于</option>
+            <option value="change_percent_below">跌幅低于</option>
+            <option value="change_percent_above">涨幅高于</option>
+          </select>
+        </label>
+        <div class="two-col">
+          <label>阈值 <input id="rule-threshold" type="number" step="0.01" placeholder="例如 8.00 或 -3" /></label>
+          <label>提醒信号
+            <select id="rule-signal">
+              <option value="buy_watch">买入关注</option>
+              <option value="sell_watch">卖出关注</option>
+              <option value="risk_warning">风险提示</option>
+              <option value="hold_watch">继续观察</option>
             </select>
           </label>
-          <label>股票代码 <input id="stock-symbol" value="${state.selectedSymbol}" placeholder="AAPL" /></label>
-          <div class="two-col">
-            <label>买入关注价 <input id="buy-price" type="number" min="0" step="0.01" placeholder="例如 160" /></label>
-            <label>卖出关注价 <input id="sell-price" type="number" min="0" step="0.01" placeholder="例如 230" /></label>
-          </div>
-          <div class="actions">
-            <button id="lookup-stock" type="button">获取股票信息</button>
-            <button id="save-monitor-stock" type="button">加入/更新监控</button>
-          </div>
-          <button id="load-watchlists" type="button">刷新股票池列表</button>
-        </article>
-        <article>
-          <h3>股票信息</h3>
-          ${selectedQuote ? `<p>${state.selectedMarket}:${state.selectedSymbol} 当前 ${formatPrice(valueOf(selectedQuote, "Price", "price"))}</p>` : "<p>输入股票代码后点击获取股票信息。</p>"}
-          <p>${selectedProfile ? summarizeProfile(selectedProfile) : "暂无公司信息。"}</p>
-          <p class="muted">${selectedProfile ? valueOf(selectedProfile, "analysis", "Analysis") : "获取后会展示公司、产品和观察建议。"}</p>
-        </article>
-        <article class="wide">
-          <h3>已监控代码</h3>
-          ${symbols.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>买入关注</th><th>卖出关注</th><th>当前价</th><th>状态</th><th></th></tr></thead><tbody>${symbolRows}</tbody></table>` : `<p>${view.empty}</p>`}
-        </article>
-        <article>
-          <h3>我的股票池</h3>
-          ${state.watchlists.length ? `<ul>${watchlists}</ul>` : "<p>暂无列表，点击刷新股票池列表。</p>"}
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "holdings") {
-    const rows = state.holdings.map((item) => `<li>${item.Market || item.market}:${item.Symbol || item.symbol} 数量 ${item.Quantity || item.quantity} 成本 ${item.CostBasis || item.cost_basis}</li>`).join("");
-    return `
-      <section class="grid">
-        <article>
-          <h3>持仓导入</h3>
-          <p>${state.holdingsImport ? `已导入 ${state.holdingsImport.imported} 条持仓` : view.empty}</p>
-          <button id="import-holdings" type="button">导入 Demo 持仓</button>
-          <button id="load-holdings" type="button">刷新持仓列表</button>
-        </article>
-        <article>
-          <h3>导入格式</h3>
-          <p class="code">market,symbol,quantity,cost_basis</p>
-          <p class="muted">只读数据用于提醒和风险分析。</p>
-        </article>
-        <article>
-          <h3>当前持仓</h3>
-          ${state.holdings.length ? `<ul>${rows}</ul>` : "<p>暂无持仓，点击导入 Demo 持仓。</p>"}
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "rules") {
-    const rules = state.rules.map((item) => `<li>${item.Market || item.market}:${item.Symbol || item.symbol} ${item.Type || item.type} ${item.Threshold || item.threshold} -> ${item.Signal || item.signal}</li>`).join("");
-    return `
-      <section class="grid">
-        <article>
-          <h3>AAPL 价格提醒</h3>
-          <p>${state.rule ? `${state.rule.Signal || state.rule.signal}，阈值 ${state.rule.Threshold || state.rule.threshold}` : view.empty}</p>
-          <button id="create-rule" type="button">创建 Demo 提醒规则</button>
-          <button id="load-rules" type="button">刷新规则列表</button>
-        </article>
-        <article>
-          <h3>规则原则</h3>
-          <p class="muted">规则只产生观察、买入关注、卖出关注和风险提示，不触发交易。</p>
-        </article>
-        <article>
-          <h3>当前规则</h3>
-          ${state.rules.length ? `<ul>${rules}</ul>` : "<p>暂无规则，点击创建 Demo 提醒规则。</p>"}
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "refresh") {
-    const modes = refreshModes.map((mode) => `<option value="${mode.id}">${mode.label}</option>`).join("");
-    return `
-      <section class="grid">
-        <article>
-          <h3>刷新状态</h3>
-          <p>${formatRefreshStatus(state.job)}</p>
-          <button id="run-demo" type="button">运行真实 AAPL 刷新</button>
-          <button id="collect-real" type="button">测试并保存 AAPL 行情</button>
-        </article>
-        <article>
-          <h3>刷新模式</h3>
-          <select>${modes}</select>
-          <p class="muted">自动刷新应保持低频，并遵守数据源限制。</p>
-        </article>
-        <article>
-          <h3>最近保存行情</h3>
-          <p>${state.collected ? `${valueOf(state.collected, "Name", "name") || "AAPL"} 收盘 ${valueOf(state.collected, "Price", "price")}` : "暂无保存记录。"}</p>
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "alerts") {
-    const alerts = state.alerts.map((item) => `<li>${item.Signal || item.signal} ${item.Market || item.market}:${item.Symbol || item.symbol} - ${item.Summary || item.summary}</li>`).join("");
-    return `
-      <section class="grid">
-        <article>
-          <h3>已触发提醒</h3>
-          ${state.alerts.length ? `<ul>${alerts}</ul>` : `<p>${view.empty}</p>`}
-          <button id="load-alerts" type="button">刷新提醒列表</button>
-        </article>
-        <article>
-          <h3>通知状态</h3>
-          <p>${state.notifications.length ? `通知 ${state.notifications.length} 条` : "暂无通知。"}</p>
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "reports") {
-    const profileSummary = state.profile ? summarizeProfile(state.profile) : "尚未加载公司/产品分析。";
-    const changes = state.dailyChanges.map((item) => `<li>${formatDailyChange(item)}</li>`).join("");
-    return `
-      <section class="grid">
-        <article>
-          <h3>${state.selectedSymbol} 真实行情曲线</h3>
-          ${renderPriceChart(state.snapshots)}
-          <button id="collect-report-market" type="button">测试并保存当前股票行情</button>
-          <button id="load-market-analysis" type="button">加载已保存行情与分析</button>
-        </article>
-        <article>
-          <h3>涨跌日历</h3>
-          ${renderChangeCalendar(state.dailyChanges)}
-        </article>
-        <article>
-          <h3>每日涨跌记录</h3>
-          ${state.dailyChanges.length ? `<ul>${changes}</ul>` : `<p>${view.empty}</p>`}
-          <p class="muted">这些记录已生成 RAG 文本字段，后续可入库向量化。</p>
-        </article>
-        <article>
-          <h3>公司和产品分析</h3>
-          <p>${profileSummary}</p>
-          <p>${state.profile ? valueOf(state.profile, "analysis", "Analysis") : "加载后展示业务、产品和走势分析。"}</p>
-          <p class="muted">${state.profile ? valueOf(state.profile, "disclaimer", "Disclaimer") : "仅用于监控和研究，不构成投资建议。"}</p>
-        </article>
-      </section>
-    `;
-  }
-  if (state.activeView === "accounts") {
-    return `
-      <section class="grid">
-        <article>
-          <h3>账户接入</h3>
-          <p>${view.empty}</p>
-        </article>
-        <article>
-          <h3>安全边界</h3>
-          <p class="muted">只允许只读数据接入，不实现买入、卖出或自动下单。</p>
-        </article>
-      </section>
-    `;
-  }
+        </div>
+        <label>提醒等级
+          <select id="rule-risk">
+            <option value="low">低</option>
+            <option value="medium" selected>中</option>
+            <option value="high">高</option>
+            <option value="critical">严重</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button id="save-rule" type="button">保存提醒规则</button>
+          <button id="load-rules" type="button">刷新规则</button>
+        </div>
+      </article>
+      <article>
+        <h3>规则说明</h3>
+        <p class="muted">提醒规则只写入日志和通知中心，不会下单。等级越高，提醒中心颜色越醒目。</p>
+      </article>
+      <article class="wide">
+        <h3>当前规则</h3>
+        ${state.rules.length ? `<table class="stock-table"><thead><tr><th>代码</th><th>条件</th><th>阈值</th><th>信号</th><th>等级</th><th>状态</th></tr></thead><tbody>${rules}</tbody></table>` : `<p>${view.empty}</p>`}
+      </article>
+    </section>
+  `;
+}
+
+function renderRefreshView() {
+  const modes = refreshModes.map((mode) => `<option value="${mode.id}">${mode.label}</option>`).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>刷新对象</h3>
+        <p>当前股票池：${currentWatchlistName()}</p>
+        <p>${formatRefreshStatus(state.job)}</p>
+        <div class="actions">
+          <button id="refresh-current-pool" type="button">刷新当前股票池</button>
+          <button id="refresh-holdings" type="button">刷新全部持仓</button>
+        </div>
+      </article>
+      <article>
+        <h3>刷新模式</h3>
+        <select id="refresh-mode">${modes}</select>
+        <p class="muted">建议保守自动或手动刷新，避免高频访问数据源或外部账户。</p>
+      </article>
+      <article>
+        <h3>最近保存行情</h3>
+        <p>${state.collected ? `${valueOf(state.collected, "Name", "name") || `${state.selectedMarket}:${state.selectedSymbol}`} 最新 ${formatPrice(valueOf(state.collected, "Price", "price"))}` : "暂无保存记录。"}</p>
+      </article>
+    </section>
+  `;
+}
+
+function renderAlertsView(view) {
+  const alerts = state.alerts.map((item) => {
+    const risk = valueOf(item, "RiskLevel", "risk_level") || "low";
+    return `<li class="alert-item risk-card-${risk}">
+      <strong>${signalLabel(valueOf(item, "Signal", "signal"))}</strong>
+      <span>${valueOf(item, "Market", "market")}:${valueOf(item, "Symbol", "symbol")}</span>
+      <span class="risk-badge risk-${risk}">${riskLabel(risk)}</span>
+      <p>${valueOf(item, "Summary", "summary")}</p>
+    </li>`;
+  }).join("");
+  const notifications = state.notifications.map((item) => {
+    const id = valueOf(item, "ID", "id");
+    const risk = valueOf(item, "RiskLevel", "risk_level") || "low";
+    return `<li class="alert-item risk-card-${risk}">
+      <strong>${valueOf(item, "Title", "title")}</strong>
+      <span>${valueOf(item, "Read", "read") ? "已读" : "未读"}</span>
+      <p>${valueOf(item, "Summary", "summary")}</p>
+      <button data-read-notification="${id}" type="button">标记已读</button>
+    </li>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>提醒检查</h3>
+        <p>${state.job ? formatRefreshStatus(state.job) : "运行后会刷新当前股票池并根据规则写入提醒日志。"}</p>
+        <div class="actions">
+          <button id="run-alert-check" type="button">运行当前池监控检查</button>
+          <button id="load-alerts" type="button">刷新提醒中心</button>
+        </div>
+      </article>
+      <article>
+        <h3>提醒日志</h3>
+        ${state.alerts.length ? `<ul class="alert-list">${alerts}</ul>` : `<p>${view.empty}</p>`}
+      </article>
+      <article class="wide">
+        <h3>通知记录</h3>
+        ${state.notifications.length ? `<ul class="alert-list">${notifications}</ul>` : "<p>暂无通知。规则触发后会出现在这里。</p>"}
+      </article>
+    </section>
+  `;
+}
+
+function renderReportsView(view) {
+  const targets = analysisTargets();
+  const targetButtons = targets.map((item) => {
+    const key = stockKey(item.market, item.symbol);
+    return `<button class="pool-pill ${key === stockKey(state.selectedMarket, state.selectedSymbol) ? "active" : ""}" data-load-stock="${key}" type="button">${item.source} ${key}</button>`;
+  }).join("");
+  const changes = state.dailyChanges.map((item) => `<li>${formatDailyChange(item)}</li>`).join("");
+  const latestSnapshot = state.snapshots[state.snapshots.length - 1] || state.collected;
+  const latestChange = state.dailyChanges[state.dailyChanges.length - 1];
+  return `
+    <section class="grid">
+      <article class="wide">
+        <h3>分析股票</h3>
+        <div class="pill-row">${targetButtons || `<p>${view.empty}</p>`}</div>
+        <div class="inline-form">
+          ${renderStockPicker("analysis", false)}
+          <button id="collect-report-market" type="button">采集并分析当前股票</button>
+          <button id="load-market-analysis" type="button">加载已保存分析</button>
+        </div>
+      </article>
+      <article>
+        <h3>持仓分析</h3>
+        <p>${portfolioSummary()}</p>
+        <button id="analyze-holdings" type="button">刷新持仓行情</button>
+      </article>
+      <article>
+        <h3>自选分析</h3>
+        <p class="market-number">${summarizeMarketNumbers(latestSnapshot, latestChange)}</p>
+        ${renderPriceChart(state.snapshots)}
+      </article>
+      <article>
+        <h3>涨跌日历</h3>
+        ${renderChangeCalendar(state.dailyChanges)}
+      </article>
+      <article>
+        <h3>每日涨跌记录</h3>
+        ${state.dailyChanges.length ? `<ul>${changes}</ul>` : "<p>暂无每日记录，请先采集行情。</p>"}
+        <p class="muted">每日记录已包含 RAG 文本字段，可用于后续问答分析。</p>
+      </article>
+      <article>
+        <h3>公司和产品情况</h3>
+        <p>${state.profile ? summarizeProfile(state.profile) : "尚未加载公司/产品分析。"}</p>
+        <p>${state.profile ? valueOf(state.profile, "analysis", "Analysis") : "点击采集后展示业务、产品和趋势归纳。"}</p>
+        <p class="muted">${state.profile ? valueOf(state.profile, "disclaimer", "Disclaimer") : "仅用于监控和研究，不构成投资建议。"}</p>
+      </article>
+    </section>
+  `;
+}
+
+function renderAccountsView() {
+  const accounts = state.accountConfigs.map((item) => {
+    const metadata = valueOf(item, "Metadata", "metadata") || {};
+    return `<tr>
+      <td>${valueOf(item, "ID", "id")}</td>
+      <td>${valueOf(item, "Alias", "alias")}</td>
+      <td>${providerLabel(metadata.provider)}</td>
+      <td>${modeLabel(valueOf(item, "RefreshMode", "refresh_mode", "refreshMode"))}</td>
+      <td>${valueOf(item, "ReadOnly", "read_only", "readOnly") ? "只读" : "未限制"}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article>
+        <h3>外部工具只读接入</h3>
+        <label>接入来源
+          <select id="account-provider">
+            <option value="ths">同花顺</option>
+            <option value="eastmoney">东方财富</option>
+            <option value="xueqiu">雪球</option>
+            <option value="csv">CSV/手工导入</option>
+            <option value="other">其他只读来源</option>
+          </select>
+        </label>
+        <label>账户 ID <input id="account-id" placeholder="例如 ths-readonly-1" /></label>
+        <label>账户别名 <input id="account-alias" placeholder="例如 我的同花顺只读账户" /></label>
+        <label>刷新模式
+          <select id="account-refresh-mode">
+            <option value="manual">手动</option>
+            <option value="conservative">保守自动</option>
+            <option value="standard">标准自动</option>
+          </select>
+        </label>
+        <label class="inline-check"><input id="account-readonly" type="checkbox" checked /> 只读接入</label>
+        <div class="actions">
+          <button id="save-account" type="button">保存账户配置</button>
+          <button id="load-accounts" type="button">刷新账户配置</button>
+        </div>
+      </article>
+      <article>
+        <h3>安全边界</h3>
+        <p class="muted">这里只保存来源、别名、刷新模式等只读配置；不保存交易密码、token、secret，也不会执行买入或卖出。</p>
+      </article>
+      <article class="wide">
+        <h3>已配置账户</h3>
+        ${state.accountConfigs.length ? `<table class="stock-table"><thead><tr><th>ID</th><th>别名</th><th>来源</th><th>刷新模式</th><th>权限</th></tr></thead><tbody>${accounts}</tbody></table>` : "<p>暂无账户配置。</p>"}
+      </article>
+    </section>
+  `;
+}
+
+function renderSettingsView(view) {
   return `
     <section class="grid">
       <article>
         <h3>配置文件</h3>
         <p class="code">config/backend.example.json</p>
         <p class="code">agent/config/agent.example.json</p>
-        <button id="load-dependencies" type="button">检查后端依赖状态</button>
-      </article>
-      <article>
-        <h3>部署入口</h3>
-        <p class="code">sh deploy/scripts/deploy.sh</p>
+        <p class="code">deploy/docker-compose.yml</p>
         <p class="muted">${view.empty}</p>
       </article>
       <article>
-        <h3>依赖状态</h3>
+        <h3>系统检测</h3>
+        <button id="load-dependencies" type="button">测试后端、数据库、Redis、大模型和行情源</button>
         ${renderDependencies()}
+      </article>
+      <article>
+        <h3>主题设置</h3>
+        <label>显示主题
+          <select id="theme-select">
+            <option value="dark" ${state.theme === "dark" ? "selected" : ""}>深色专业</option>
+            <option value="light" ${state.theme === "light" ? "selected" : ""}>浅色清爽</option>
+          </select>
+        </label>
+      </article>
+      <article>
+        <h3>用户信息</h3>
+        <p>邮箱：${state.email}</p>
+        <p>用户 ID：${state.userID}</p>
+        <label>显示名称 <input id="display-name" value="${escapeHTML(state.displayName)}" placeholder="用于页面右上角展示" /></label>
+        <button id="save-user-settings" type="button">保存用户信息</button>
       </article>
     </section>
   `;
 }
 
 function bindViewActions() {
-  document.querySelector("#ensure-watchlist")?.addEventListener("click", ensureWatchlist);
-  document.querySelector("#add-aapl")?.addEventListener("click", addDemoSymbol);
+  document.querySelector("#create-watchlist")?.addEventListener("click", createWatchlistFromForm);
+  document.querySelectorAll("[data-select-watchlist]").forEach((button) => button.addEventListener("click", () => selectWatchlist(button.dataset.selectWatchlist)));
   document.querySelector("#lookup-stock")?.addEventListener("click", collectStockInfoFromForm);
   document.querySelector("#save-monitor-stock")?.addEventListener("click", saveMonitorStock);
-  document.querySelectorAll("[data-load-stock]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const [market, symbol] = button.dataset.loadStock.split(":");
-      collectStockInfo(market, symbol);
-    });
-  });
-  document.querySelector("#load-watchlists")?.addEventListener("click", loadWatchlists);
-  document.querySelector("#import-holdings")?.addEventListener("click", importDemoHoldings);
-  document.querySelector("#load-holdings")?.addEventListener("click", loadHoldings);
-  document.querySelector("#create-rule")?.addEventListener("click", createDemoRule);
-  document.querySelector("#load-rules")?.addEventListener("click", loadRules);
-  document.querySelector("#run-demo")?.addEventListener("click", runDemo);
-  document.querySelector("#collect-real")?.addEventListener("click", collectRealMarket);
-  document.querySelector("#load-alerts")?.addEventListener("click", loadAlerts);
-  document.querySelector("#collect-report-market")?.addEventListener("click", collectRealMarket);
+  document.querySelectorAll("[data-load-stock]").forEach((button) => button.addEventListener("click", () => {
+    const [market, symbol] = button.dataset.loadStock.split(":");
+    collectStockInfo(market, symbol);
+  }));
+  document.querySelector("#load-watchlists")?.addEventListener("click", () => loadWatchlists(true));
+  document.querySelector("#holding-source")?.addEventListener("change", fillHoldingFromSource);
+  document.querySelector("#save-holding")?.addEventListener("click", saveHolding);
+  document.querySelector("#load-holdings")?.addEventListener("click", () => loadHoldings(true));
+  document.querySelectorAll("[data-edit-holding]").forEach((button) => button.addEventListener("click", () => fillHoldingForm(button.dataset.editHolding)));
+  document.querySelectorAll("[data-delete-holding]").forEach((button) => button.addEventListener("click", () => deleteHolding(button.dataset.deleteHolding)));
+  document.querySelector("#rule-source")?.addEventListener("change", fillRuleFromSource);
+  document.querySelector("#save-rule")?.addEventListener("click", saveRuleFromForm);
+  document.querySelector("#load-rules")?.addEventListener("click", () => loadRules(true));
+  document.querySelector("#refresh-current-pool")?.addEventListener("click", refreshCurrentPool);
+  document.querySelector("#refresh-holdings")?.addEventListener("click", refreshHoldings);
+  document.querySelector("#run-alert-check")?.addEventListener("click", runAlertCheck);
+  document.querySelector("#load-alerts")?.addEventListener("click", () => loadAlerts(true));
+  document.querySelectorAll("[data-read-notification]").forEach((button) => button.addEventListener("click", () => markNotificationRead(button.dataset.readNotification)));
+  document.querySelector("#collect-report-market")?.addEventListener("click", collectReportMarket);
   document.querySelector("#load-market-analysis")?.addEventListener("click", loadMarketAnalysis);
+  document.querySelector("#analyze-holdings")?.addEventListener("click", refreshHoldings);
+  document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
+  document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
   document.querySelector("#load-dependencies")?.addEventListener("click", loadDependencies);
+  document.querySelector("#theme-select")?.addEventListener("change", (event) => {
+    state.theme = event.target.value;
+    window.localStorage.setItem("jijin_theme", state.theme);
+    render();
+  });
+  document.querySelector("#save-user-settings")?.addEventListener("click", saveLocalUserSettings);
 }
 
 function renderAuth() {
@@ -321,8 +547,8 @@ function renderAuth() {
     <main class="auth">
       <section class="auth-card">
         <h1>股票监控操作台</h1>
-        <p class="muted">请先注册或登录。密码会在后端做加盐哈希，系统不保存明文密码。</p>
-        <label>邮箱 <input id="email" value="demo@example.com" /></label>
+        <p class="muted">请先注册或登录。密码在后端加盐哈希保存，不保存明文。</p>
+        <label>邮箱 <input id="email" value="${escapeHTML(state.email || "demo@example.com")}" /></label>
         <label>密码 <input id="password" type="password" value="password123" /></label>
         <div class="actions">
           <button id="register">注册并登录</button>
@@ -340,9 +566,7 @@ async function authenticate(mode) {
   const email = document.querySelector("#email").value;
   const password = document.querySelector("#password").value;
   try {
-    const payload = mode === "register"
-      ? { id: `user-${Date.now().toString(36)}`, email, password }
-      : { email, password };
+    const payload = mode === "register" ? { id: `user-${Date.now().toString(36)}`, email, password } : { email, password };
     const data = await postJSON(`/api/auth/${mode}`, payload);
     state.token = data.token;
     state.email = data.email;
@@ -350,71 +574,100 @@ async function authenticate(mode) {
     window.localStorage.setItem("jijin_token", state.token);
     window.localStorage.setItem("jijin_email", state.email);
     window.localStorage.setItem("jijin_user_id", state.userID);
-    state.message = "登录成功。";
+    state.message = "登录成功，正在加载你的数据。";
+    await bootstrapUserData();
   } catch (error) {
     state.message = error.message;
   }
   render();
 }
 
-async function ensureWatchlist() {
+async function bootstrapUserData() {
+  await Promise.allSettled([loadWatchlists(false), loadHoldings(false), loadRules(false), loadAlerts(false), loadAccounts(false)]);
+  await ensureDefaultWatchlist();
+}
+
+async function createWatchlistFromForm() {
+  const name = document.querySelector("#watchlist-name")?.value?.trim() || "";
+  if (!name) {
+    state.message = "请填写股票池名称。";
+    render();
+    return;
+  }
   try {
-    await postJSON("/api/watchlists", { id: "wl-demo", user_id: state.userID, name: "Demo Watchlist" }, state.token).catch(() => {});
-    state.watchlist = await getJSON("/api/watchlists/wl-demo", state.token);
+    const id = `wl-${state.userID}-${Date.now().toString(36)}`.replace(/[^A-Za-z0-9_-]/g, "-");
+    await postJSON("/api/watchlists", { id, user_id: state.userID, name }, state.token);
+    state.selectedWatchlistID = id;
+    window.localStorage.setItem("jijin_selected_watchlist", id);
+    await loadWatchlists(false);
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(id)}`, state.token);
+    state.message = `股票池「${name}」已创建。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function selectWatchlist(id) {
+  try {
+    state.selectedWatchlistID = id;
+    window.localStorage.setItem("jijin_selected_watchlist", id);
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(id)}`, state.token);
+    state.message = `已切换到股票池「${currentWatchlistName()}」。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function ensureDefaultWatchlist() {
+  if (state.watchlists.length && state.selectedWatchlistID) {
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token).catch(() => state.watchlist);
+    return;
+  }
+  if (state.watchlists.length) {
+    state.selectedWatchlistID = itemID(state.watchlists[0]);
+    window.localStorage.setItem("jijin_selected_watchlist", state.selectedWatchlistID);
+    state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token).catch(() => state.watchlists[0]);
+    return;
+  }
+  const id = `wl-${state.userID}-default`.replace(/[^A-Za-z0-9_-]/g, "-");
+  await postJSON("/api/watchlists", { id, user_id: state.userID, name: "我的股票池" }, state.token).catch(() => {});
+  state.selectedWatchlistID = id;
+  window.localStorage.setItem("jijin_selected_watchlist", id);
+  await loadWatchlists(false);
+  state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(id)}`, state.token).catch(() => null);
+}
+
+async function loadWatchlists(showMessage) {
+  try {
     state.watchlists = await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = "Demo 股票池已准备。";
+    if (state.selectedWatchlistID) {
+      state.watchlist = await getJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}`, state.token).catch(() => state.watchlist);
+    }
+    if (showMessage) state.message = `已加载 ${state.watchlists.length} 个股票池。`;
   } catch (error) {
     state.message = error.message;
   }
-  render();
-}
-
-async function addDemoSymbol() {
-  try {
-    await ensureWatchlistData();
-    state.watchlist = await postJSON("/api/watchlists/wl-demo/symbols", { market: "US", symbol: "AAPL", buy_price: 160, sell_price: 230 }, state.token).catch(async () => getJSON("/api/watchlists/wl-demo", state.token));
-    state.watchlists = await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = "AAPL 已加入股票池。";
-  } catch (error) {
-    state.message = error.message;
-  }
-  render();
-}
-
-async function importDemoHoldings() {
-  try {
-    const csv = "market,symbol,quantity,cost_basis\nUS,AAPL,10,145\nUS,MSFT,5,390\n";
-    state.holdingsImport = await postJSON("/api/holdings/import", { user_id: state.userID, csv }, state.token);
-    state.holdings = state.holdingsImport.holdings || state.holdingsImport.Holdings || await getJSON(`/api/holdings?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = "Demo 持仓已导入。";
-  } catch (error) {
-    state.message = error.message;
-  }
-  render();
-}
-
-async function collectStockInfoFromForm() {
-  const form = readStockForm();
-  if (!form) return;
-  await collectStockInfo(form.market, form.symbol);
+  if (showMessage) render();
 }
 
 async function saveMonitorStock() {
-  const form = readStockForm();
+  const form = readStockForm("stock");
   if (!form) return;
   try {
-    await ensureWatchlistData();
+    await ensureDefaultWatchlist();
     await collectStockInfoData(form.market, form.symbol);
-    state.watchlist = await postJSON("/api/watchlists/wl-demo/symbols", {
+    state.watchlist = await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, {
       market: form.market,
       symbol: form.symbol,
       buy_price: form.buyPrice,
       sell_price: form.sellPrice,
     }, state.token);
     await createPriceRules(form);
-    state.watchlists = await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = `${form.market}:${form.symbol} 已加入监控。`;
+    await loadWatchlists(false);
+    await loadRules(false);
+    state.message = `${form.market}:${form.symbol} 已加入「${currentWatchlistName()}」。`;
   } catch (error) {
     state.message = error.message;
   }
@@ -453,107 +706,197 @@ async function createPriceRules(form) {
   }
 }
 
-async function createDemoRule() {
-  try {
-    state.rule = await postJSON("/api/alert-rules", {
-      id: "rule-demo",
-      user_id: state.userID,
-      market: "US",
-      symbol: "AAPL",
-      type: "price_below",
-      threshold: 160,
-      signal: "buy_watch",
-      risk_level: "medium",
-      enabled: true,
-      cooldown_seconds: 1800,
-    }, state.token).catch(async () => {
-      const rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
-      return rules.find((item) => (item.ID || item.id) === "rule-demo") || null;
-    });
-    state.rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = "Demo 提醒规则已准备。";
-  } catch (error) {
-    state.message = error.message;
-  }
-  render();
-}
-
-async function loadWatchlists() {
-  try {
-    state.watchlists = await getJSON(`/api/watchlists?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = `已加载 ${state.watchlists.length} 个股票池。`;
-  } catch (error) {
-    state.message = error.message;
-  }
-  render();
-}
-
-async function loadHoldings() {
+async function loadHoldings(showMessage) {
   try {
     state.holdings = await getJSON(`/api/holdings?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = `已加载 ${state.holdings.length} 条持仓。`;
+    if (showMessage) state.message = `已加载 ${state.holdings.length} 条持仓。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
+async function saveHolding() {
+  const market = document.querySelector("#holding-market")?.value || state.selectedMarket;
+  const symbol = (document.querySelector("#holding-symbol")?.value || "").trim().toUpperCase();
+  const quantity = Number(document.querySelector("#holding-quantity")?.value || 0);
+  const costBasis = Number(document.querySelector("#holding-cost")?.value || 0);
+  if (!symbol || quantity <= 0 || costBasis < 0) {
+    state.message = "请填写有效的股票代码、数量和成本价。";
+    render();
+    return;
+  }
+  try {
+    await postJSON("/api/holdings", { user_id: state.userID, market, symbol, quantity, cost_basis: costBasis }, state.token);
+    await ensureDefaultWatchlist();
+    await postJSON(`/api/watchlists/${encodeURIComponent(state.selectedWatchlistID)}/symbols`, { market, symbol }, state.token).catch(() => {});
+    await collectStockInfoData(market, symbol);
+    await Promise.all([loadHoldings(false), loadWatchlists(false)]);
+    state.message = `${market}:${symbol} 持仓已保存，并已加入当前股票池。`;
   } catch (error) {
     state.message = error.message;
   }
   render();
 }
 
-async function loadRules() {
+async function deleteHolding(key) {
+  const [market, symbol] = key.split(":");
+  try {
+    await deleteJSON(`/api/holdings?user_id=${encodeURIComponent(state.userID)}&market=${encodeURIComponent(market)}&symbol=${encodeURIComponent(symbol)}`, state.token);
+    await loadHoldings(false);
+    state.message = `${key} 持仓已删除。分析页仍可手动选择该股票继续观察。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+function fillHoldingForm(key) {
+  const [market, symbol] = key.split(":");
+  const item = state.holdings.find((holding) => stockKey(valueOf(holding, "Market", "market"), valueOf(holding, "Symbol", "symbol")) === key);
+  setInput("#holding-market", market);
+  setInput("#holding-symbol", symbol);
+  setInput("#holding-quantity", valueOf(item, "Quantity", "quantity") || "");
+  setInput("#holding-cost", valueOf(item, "CostBasis", "cost_basis") || "");
+}
+
+function fillHoldingFromSource() {
+  const key = document.querySelector("#holding-source")?.value || "";
+  if (key) fillHoldingFormFromKey(key, "holding");
+}
+
+function fillRuleFromSource() {
+  const key = document.querySelector("#rule-source")?.value || "";
+  if (key) fillHoldingFormFromKey(key, "rule");
+}
+
+function fillHoldingFormFromKey(key, prefix) {
+  const [market, symbol] = key.split(":");
+  setInput(`#${prefix}-market`, market);
+  setInput(`#${prefix}-symbol`, symbol);
+}
+
+async function saveRuleFromForm() {
+  const market = document.querySelector("#rule-market")?.value || state.selectedMarket;
+  const symbol = (document.querySelector("#rule-symbol")?.value || "").trim().toUpperCase();
+  const type = document.querySelector("#rule-type")?.value || "price_below";
+  const signal = document.querySelector("#rule-signal")?.value || "buy_watch";
+  const riskLevel = document.querySelector("#rule-risk")?.value || "medium";
+  const threshold = Number(document.querySelector("#rule-threshold")?.value || 0);
+  if (!symbol || threshold === 0) {
+    state.message = "请填写股票代码和阈值。";
+    render();
+    return;
+  }
+  try {
+    const id = `rule-${state.userID}-${market}-${symbol}-${type}-${Date.now()}`.replace(/[^A-Za-z0-9_-]/g, "-");
+    await postJSON("/api/alert-rules", {
+      id,
+      user_id: state.userID,
+      market,
+      symbol,
+      type,
+      threshold,
+      signal,
+      risk_level: riskLevel,
+      enabled: true,
+      cooldown_seconds: 1800,
+    }, state.token);
+    await loadRules(false);
+    state.message = `${market}:${symbol} ${riskLabel(riskLevel)}提醒规则已保存。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function loadRules(showMessage) {
   try {
     state.rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = `已加载 ${state.rules.length} 条提醒规则。`;
+    if (showMessage) state.message = `已加载 ${state.rules.length} 条提醒规则。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
+async function refreshCurrentPool() {
+  try {
+    await ensureDefaultWatchlist();
+    state.job = await postJSON("/api/refresh/manual", { user_id: state.userID, watchlist_id: state.selectedWatchlistID, job_id: `pool-${Date.now()}` }, state.token);
+    state.snapshots = state.job.Snapshots || state.job.snapshots || [];
+    for (const snapshot of state.snapshots) {
+      state.quoteByKey[stockKey(valueOf(snapshot, "Market", "market"), valueOf(snapshot, "Symbol", "symbol"))] = snapshot;
+    }
+    await Promise.all([loadAlerts(false), loadMarketAnalysisData().catch(() => {})]);
+    state.message = `当前股票池刷新完成，共 ${state.snapshots.length} 条行情。`;
   } catch (error) {
     state.message = error.message;
   }
   render();
 }
 
-async function loadAlerts() {
+async function refreshHoldings() {
+  try {
+    if (!state.holdings.length) await loadHoldings(false);
+    for (const item of state.holdings) {
+      await collectStockInfoData(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol"));
+    }
+    state.message = state.holdings.length ? `已刷新 ${state.holdings.length} 条持仓行情。` : "暂无持仓可刷新。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function runAlertCheck() {
+  try {
+    await refreshCurrentPool();
+    await loadAlerts(false);
+    state.message = state.alerts.length ? `监控检查完成，已有 ${state.alerts.length} 条提醒日志。` : "监控检查完成，当前没有规则被触发。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function loadAlerts(showMessage) {
   try {
     state.alerts = await getJSON(`/api/alerts?user_id=${encodeURIComponent(state.userID)}`, state.token);
     state.notifications = await getJSON(`/api/notifications?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    state.message = "提醒列表已刷新。";
+    if (showMessage) state.message = "提醒中心已刷新。";
   } catch (error) {
     state.message = error.message;
   }
-  render();
+  if (showMessage) render();
 }
 
-async function ensureWatchlistData() {
-  await postJSON("/api/watchlists", { id: "wl-demo", user_id: state.userID, name: "Demo Watchlist" }, state.token).catch(() => {});
-  state.watchlist = await getJSON("/api/watchlists/wl-demo", state.token);
-}
-
-async function runDemo() {
+async function markNotificationRead(id) {
   try {
-    await ensureWatchlistData();
-    await postJSON("/api/watchlists/wl-demo/symbols", { market: "US", symbol: "AAPL", buy_price: 160, sell_price: 230 }, state.token).catch(() => {});
-    await createDemoRuleData();
-    state.job = await postJSON("/api/refresh/manual", { user_id: state.userID, watchlist_id: "wl-demo", job_id: `job-${Date.now()}` }, state.token);
-    state.snapshots = state.job.Snapshots || state.job.snapshots || [];
-    state.alerts = await getJSON(`/api/alerts?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    await loadMarketAnalysisData();
-    state.message = "Demo 链路已执行。";
+    await postJSON("/api/notifications/read", { id }, state.token);
+    await loadAlerts(false);
+    state.message = "通知已标记为已读。";
   } catch (error) {
     state.message = error.message;
   }
   render();
 }
 
-async function collectRealMarket() {
-  try {
-    await collectStockInfoData(state.selectedMarket, state.selectedSymbol);
-    state.message = `已测试真实行情源并保存 ${state.selectedMarket}:${state.selectedSymbol} 快照。`;
-  } catch (error) {
-    state.message = error.message;
-  }
-  render();
+async function collectStockInfoFromForm() {
+  const form = readStockForm("stock");
+  if (form) await collectStockInfo(form.market, form.symbol);
+}
+
+async function collectReportMarket() {
+  const form = readStockForm("analysis");
+  if (!form) return;
+  await collectStockInfo(form.market, form.symbol);
 }
 
 async function collectStockInfo(market, symbol) {
   try {
     await collectStockInfoData(market, symbol);
-    state.message = `已获取 ${market}:${symbol} 股票信息。`;
+    state.message = `已获取 ${market}:${symbol} 行情和公司信息。`;
   } catch (error) {
     state.message = error.message;
   }
@@ -561,7 +904,7 @@ async function collectStockInfo(market, symbol) {
 }
 
 async function collectStockInfoData(market, symbol) {
-  const normalizedMarket = String(market || "US").trim().toUpperCase();
+  const normalizedMarket = String(market || "CN").trim().toUpperCase();
   const normalizedSymbol = String(symbol || "").trim().toUpperCase();
   if (!normalizedSymbol) throw new Error("请输入股票代码。");
   state.selectedMarket = normalizedMarket;
@@ -577,28 +920,10 @@ async function collectStockInfoData(market, symbol) {
   state.profileByKey[stockKey(normalizedMarket, normalizedSymbol)] = state.profile;
 }
 
-async function createDemoRuleData() {
-  state.rule = await postJSON("/api/alert-rules", {
-    id: "rule-demo",
-    user_id: state.userID,
-    market: "US",
-    symbol: "AAPL",
-    type: "price_below",
-    threshold: 160,
-    signal: "buy_watch",
-    risk_level: "medium",
-    enabled: true,
-    cooldown_seconds: 1800,
-  }, state.token).catch(async () => {
-    const rules = await getJSON(`/api/alert-rules?user_id=${encodeURIComponent(state.userID)}`, state.token);
-    return rules.find((item) => (item.ID || item.id) === "rule-demo") || null;
-  });
-}
-
 async function loadMarketAnalysis() {
   try {
     await loadMarketAnalysisData();
-    state.message = "真实行情、每日涨跌和公司分析已加载。";
+    state.message = `${state.selectedMarket}:${state.selectedSymbol} 已加载保存的行情、涨跌和公司分析。`;
   } catch (error) {
     state.message = error.message;
   }
@@ -614,6 +939,39 @@ async function loadMarketAnalysisData() {
   state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] = state.profile;
 }
 
+async function saveAccountConfig() {
+  const provider = document.querySelector("#account-provider")?.value || "csv";
+  const id = document.querySelector("#account-id")?.value?.trim() || `${provider}-${Date.now().toString(36)}`;
+  const alias = document.querySelector("#account-alias")?.value?.trim() || providerLabel(provider);
+  const refreshMode = document.querySelector("#account-refresh-mode")?.value || "manual";
+  const readOnly = document.querySelector("#account-readonly")?.checked === true;
+  try {
+    await postJSON("/api/accounts", {
+      id,
+      user_id: state.userID,
+      alias,
+      refresh_mode: refreshMode,
+      read_only: readOnly,
+      metadata: { provider },
+    }, state.token);
+    await loadAccounts(false);
+    state.message = `${providerLabel(provider)}只读账户配置已保存。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function loadAccounts(showMessage) {
+  try {
+    state.accountConfigs = await getJSON(`/api/accounts?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    if (showMessage) state.message = `已加载 ${state.accountConfigs.length} 个账户配置。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
 async function loadDependencies() {
   try {
     state.dependencies = await getJSON("/api/system/dependencies", state.token);
@@ -624,17 +982,37 @@ async function loadDependencies() {
   render();
 }
 
+function saveLocalUserSettings() {
+  state.displayName = document.querySelector("#display-name")?.value?.trim() || "";
+  window.localStorage.setItem("jijin_display_name", state.displayName);
+  state.message = "用户显示信息已保存到本机。";
+  render();
+}
+
+function renderStockPicker(prefix, includePrices) {
+  return `
+    <label>市场
+      <select id="${prefix}-market">
+        ${["CN", "HK", "US"].map((market) => `<option value="${market}" ${market === state.selectedMarket ? "selected" : ""}>${marketLabel(market)}</option>`).join("")}
+      </select>
+    </label>
+    <label>股票代码 <input id="${prefix}-symbol" value="${escapeHTML(state.selectedSymbol)}" placeholder="例如 000821" /></label>
+    ${includePrices ? "" : ""}
+  `;
+}
+
 function renderDependencies() {
-  if (!state.dependencies) return "<p>点击检查后端依赖状态。</p>";
-  return `<ul>${["database", "redis", "llm", "stock_source"].map((key) => {
+  if (!state.dependencies) return "<p class=\"muted\">点击按钮后检查连接状态。</p>";
+  const labels = { database: "数据库", redis: "Redis", llm: "大模型", stock_source: "行情源" };
+  return `<ul class="dependency-list">${Object.keys(labels).map((key) => {
     const item = state.dependencies[key];
-    return `<li>${key}: ${item?.reachable ? "可用" : "未就绪"} - ${item?.message || ""}</li>`;
+    return `<li><span class="${item?.reachable ? "dot ok" : "dot bad"}"></span>${labels[key]}：${item?.reachable ? "可用" : "未就绪"} <span class="muted">${item?.message || ""}</span></li>`;
   }).join("")}</ul>`;
 }
 
-function readStockForm() {
-  const market = document.querySelector("#stock-market")?.value || state.selectedMarket || "US";
-  const symbol = (document.querySelector("#stock-symbol")?.value || "").trim().toUpperCase();
+function readStockForm(prefix) {
+  const market = document.querySelector(`#${prefix}-market`)?.value || state.selectedMarket || "CN";
+  const symbol = (document.querySelector(`#${prefix}-symbol`)?.value || "").trim().toUpperCase();
   const buyPrice = Number(document.querySelector("#buy-price")?.value || 0);
   const sellPrice = Number(document.querySelector("#sell-price")?.value || 0);
   if (!symbol) {
@@ -650,6 +1028,70 @@ function readStockForm() {
   return { market, symbol, buyPrice, sellPrice };
 }
 
+function currentSymbols() {
+  return state.watchlist?.symbols || state.watchlist?.Symbols || [];
+}
+
+function allPoolSymbols() {
+  const out = [];
+  for (const pool of state.watchlists) {
+    for (const item of (pool.Symbols || pool.symbols || [])) {
+      out.push({ market: valueOf(item, "Market", "market"), symbol: valueOf(item, "Symbol", "symbol"), source: "股票池" });
+    }
+  }
+  return uniqueStocks(out);
+}
+
+function analysisTargets() {
+  const holdingTargets = state.holdings.map((item) => ({
+    market: valueOf(item, "Market", "market"),
+    symbol: valueOf(item, "Symbol", "symbol"),
+    source: "持仓",
+  }));
+  return uniqueStocks([...holdingTargets, ...allPoolSymbols(), { market: state.selectedMarket, symbol: state.selectedSymbol, source: "当前" }]);
+}
+
+function uniqueStocks(items) {
+  const map = new Map();
+  for (const item of items) {
+    if (!item.market || !item.symbol) continue;
+    const key = stockKey(item.market, item.symbol);
+    if (!map.has(key)) map.set(key, { market: String(item.market).toUpperCase(), symbol: String(item.symbol).toUpperCase(), source: item.source || "自选" });
+  }
+  return [...map.values()];
+}
+
+function stockOptions(items) {
+  return items.map((item) => `<option value="${stockKey(item.market, item.symbol)}">${item.source || "自选"} ${stockKey(item.market, item.symbol)}</option>`).join("");
+}
+
+function portfolioSummary() {
+  if (!state.holdings.length) return "暂无持仓，添加持仓后会自动进入组合分析。";
+  let costValue = 0;
+  let latestValue = 0;
+  for (const item of state.holdings) {
+    const market = valueOf(item, "Market", "market");
+    const symbol = valueOf(item, "Symbol", "symbol");
+    const quantity = Number(valueOf(item, "Quantity", "quantity") || 0);
+    const cost = Number(valueOf(item, "CostBasis", "cost_basis") || 0);
+    const quote = state.quoteByKey[stockKey(market, symbol)];
+    const latest = Number(valueOf(quote, "Price", "price") || cost);
+    costValue += cost * quantity;
+    latestValue += latest * quantity;
+  }
+  const pnl = latestValue - costValue;
+  return `持仓 ${state.holdings.length} 条，成本 ${costValue.toFixed(2)}，估算市值 ${latestValue.toFixed(2)}，浮动盈亏 ${pnl.toFixed(2)}。`;
+}
+
+function currentWatchlistName() {
+  const item = state.watchlists.find((pool) => itemID(pool) === state.selectedWatchlistID) || state.watchlist;
+  return valueOf(item, "Name", "name") || "我的股票池";
+}
+
+function itemID(item) {
+  return valueOf(item, "ID", "id") || "";
+}
+
 function stockKey(market, symbol) {
   return `${String(market || "").toUpperCase()}:${String(symbol || "").toUpperCase()}`;
 }
@@ -659,4 +1101,45 @@ function formatPrice(value) {
   return price > 0 ? price.toFixed(2) : "-";
 }
 
-render();
+function setInput(selector, value) {
+  const input = document.querySelector(selector);
+  if (input) input.value = value;
+}
+
+function marketLabel(market) {
+  return { CN: "A 股 / CN", HK: "港股 / HK", US: "美股 / US" }[market] || market;
+}
+
+function modeLabel(mode) {
+  return { manual: "手动", conservative: "保守自动", standard: "标准自动" }[mode] || mode || "-";
+}
+
+function providerLabel(provider) {
+  return { ths: "同花顺", eastmoney: "东方财富", xueqiu: "雪球", csv: "CSV/手工导入", other: "其他只读来源" }[provider] || provider || "-";
+}
+
+function ruleTypeLabel(type) {
+  return { price_below: "价格低于", price_above: "价格高于", change_percent_below: "跌幅低于", change_percent_above: "涨幅高于" }[type] || type || "-";
+}
+
+function signalLabel(signal) {
+  return { buy_watch: "买入关注", sell_watch: "卖出关注", risk_warning: "风险提示", hold_watch: "继续观察" }[signal] || signal || "-";
+}
+
+function riskLabel(risk) {
+  return { low: "低", medium: "中", high: "高", critical: "严重" }[risk] || risk || "低";
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+}
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[char]));
+}
+
+if (state.token) {
+  bootstrapUserData().finally(render);
+} else {
+  render();
+}

@@ -3,6 +3,8 @@ package accounts
 import (
 	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	"jijin/backend/internal/holdings"
 	"jijin/backend/internal/marketdata"
@@ -16,6 +18,8 @@ type Config struct {
 	RefreshMode settings.RefreshMode
 	ReadOnly    bool
 	Metadata    map[string]string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (c Config) Validate() error {
@@ -35,6 +39,56 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+type Repository struct {
+	mu       sync.RWMutex
+	accounts map[string]Config
+}
+
+func NewRepository() *Repository {
+	return &Repository{accounts: map[string]Config{}}
+}
+
+func (r *Repository) Save(config Config) (Config, error) {
+	if err := config.Validate(); err != nil {
+		return Config{}, err
+	}
+	now := time.Now().UTC()
+	if config.CreatedAt.IsZero() {
+		config.CreatedAt = now
+	}
+	config.UpdatedAt = now
+	if config.Metadata == nil {
+		config.Metadata = map[string]string{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.accounts[config.ID] = copyConfig(config)
+	return config, nil
+}
+
+func (r *Repository) ListByUser(userID string) []Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []Config{}
+	for _, account := range r.accounts {
+		if account.UserID == userID {
+			out = append(out, copyConfig(account))
+		}
+	}
+	return out
+}
+
+func copyConfig(config Config) Config {
+	if config.Metadata != nil {
+		copied := map[string]string{}
+		for key, value := range config.Metadata {
+			copied[key] = value
+		}
+		config.Metadata = copied
+	}
+	return config
 }
 
 type PositionRisk struct {

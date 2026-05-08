@@ -22,6 +22,19 @@ func TestConfigMustBeReadOnly(t *testing.T) {
 	}
 }
 
+func TestRepositorySavesAndListsAccounts(t *testing.T) {
+	repo := NewRepository()
+	account, err := repo.Save(Config{ID: "acct-1", UserID: "user-1", Alias: "Main", RefreshMode: settings.RefreshModeConservative, ReadOnly: true, Metadata: map[string]string{"provider": "csv"}})
+	if err != nil {
+		t.Fatalf("save account: %v", err)
+	}
+	account.Metadata["provider"] = "changed"
+	got := repo.ListByUser("user-1")
+	if len(got) != 1 || got[0].Alias != "Main" || got[0].Metadata["provider"] != "csv" {
+		t.Fatalf("unexpected accounts: %#v", got)
+	}
+}
+
 func TestCalculateRisk(t *testing.T) {
 	result := CalculateRisk(
 		[]holdings.Holding{

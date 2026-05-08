@@ -49,9 +49,15 @@ func (s *Server) handleAlertRules(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadRequest, "validation_error", err.Error(), requestID(r))
 			return
 		}
+		if s.store != nil {
+			if err := s.store.SaveAlertRule(rule); err != nil {
+				WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+				return
+			}
+		}
 		writeJSON(w, http.StatusCreated, rule)
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.alertRules.ListByUser(r.URL.Query().Get("user_id")))
+		writeJSON(w, http.StatusOK, s.listAlertRules(r.URL.Query().Get("user_id")))
 	default:
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
 	}
@@ -62,6 +68,15 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
 		return
 	}
+	if s.store != nil {
+		events, err := s.store.ListAlertEventsByUser(r.URL.Query().Get("user_id"))
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, events)
+		return
+	}
 	writeJSON(w, http.StatusOK, s.alerts.ListByUser(r.URL.Query().Get("user_id")))
 }
 
@@ -70,5 +85,52 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
 		return
 	}
+	if s.store != nil {
+		messages, err := s.store.ListNotificationsByUser(r.URL.Query().Get("user_id"))
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, messages)
+		return
+	}
 	writeJSON(w, http.StatusOK, s.notifier.ListByUser(r.URL.Query().Get("user_id")))
+}
+
+type markNotificationReadRequest struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleNotificationRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
+		return
+	}
+	var req markNotificationReadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "validation_error", "Invalid JSON body.", requestID(r))
+		return
+	}
+	if s.store != nil {
+		if err := s.store.MarkNotificationRead(req.ID); err != nil {
+			WriteError(w, http.StatusNotFound, "not_found", err.Error(), requestID(r))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "read"})
+		return
+	}
+	if err := s.notifier.MarkRead(req.ID); err != nil {
+		WriteError(w, http.StatusNotFound, "not_found", err.Error(), requestID(r))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "read"})
+}
+
+func (s *Server) listAlertRules(userID string) []alerts.Rule {
+	if s.store != nil {
+		if rules, err := s.store.ListAlertRulesByUser(userID); err == nil {
+			return rules
+		}
+	}
+	return s.alertRules.ListByUser(userID)
 }

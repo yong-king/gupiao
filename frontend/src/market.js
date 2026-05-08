@@ -30,12 +30,27 @@ export function buildSparklinePath(points, width = 520, height = 180) {
 export function renderPriceChart(points) {
   const path = buildSparklinePath(points);
   if (!path) return "<p>暂无曲线数据，请先刷新真实行情。</p>";
+  const latest = points[points.length - 1] || {};
+  const latestPrice = Number(valueOf(latest, "Price", "price", "Close", "close") || 0);
   return `
     <svg class="price-chart" viewBox="0 0 520 180" role="img" aria-label="价格曲线">
       <path class="chart-grid" d="M 0 45 H 520 M 0 90 H 520 M 0 135 H 520"></path>
       <path class="chart-line" d="${path}"></path>
+      ${points.length === 1 ? `<circle class="chart-point" cx="260" cy="90" r="5"></circle>` : ""}
     </svg>
+    <p class="chart-value">最新价 ${latestPrice.toFixed(2)}，样本 ${points.length} 条</p>
   `;
+}
+
+export function summarizeMarketNumbers(snapshot, change) {
+  if (!snapshot) return "暂无行情数值。";
+  const price = Number(valueOf(snapshot, "Price", "price") || 0);
+  const open = Number(valueOf(snapshot, "Open", "open") || 0);
+  const high = Number(valueOf(snapshot, "High", "high") || 0);
+  const low = Number(valueOf(snapshot, "Low", "low") || 0);
+  const percent = Number(valueOf(change, "ChangePercent", "change_percent") || valueOf(snapshot, "ChangePercent", "change_percent") || 0);
+  const sign = percent > 0 ? "+" : "";
+  return `现价 ${price.toFixed(2)}，开 ${open.toFixed(2)}，高 ${high.toFixed(2)}，低 ${low.toFixed(2)}，涨跌幅 ${sign}${percent.toFixed(2)}%`;
 }
 
 export function monitorText(snapshot, symbol) {

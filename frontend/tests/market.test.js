@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildSparklinePath, formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeProfile } from "../src/market.js";
+import { buildSparklinePath, formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile } from "../src/market.js";
 
 test("formats daily change records for display and rag review", () => {
   const text = formatDailyChange({ date: "2026-05-06", close: 105, change: 5, change_percent: 5 });
@@ -14,6 +14,7 @@ test("builds svg price chart path", () => {
   assert.match(path, /^M /);
   assert.match(path, / L /);
   assert.match(renderPriceChart([{ price: 100 }, { price: 105 }]), /svg/);
+  assert.match(renderPriceChart([{ price: 100 }]), /chart-point/);
 });
 
 test("summarizes company profile", () => {
@@ -30,4 +31,10 @@ test("renders daily change calendar", () => {
   const html = renderChangeCalendar([{ date: "2026-05-06", close: 105, change_percent: 5 }]);
   assert.match(html, /change-calendar/);
   assert.match(html, /up/);
+});
+
+test("summarizes market numbers", () => {
+  const text = summarizeMarketNumbers({ price: 10.54, open: 10.31, high: 10.67, low: 10.31 }, { change_percent: 2.4 });
+  assert.match(text, /现价 10.54/);
+  assert.match(text, /\+2.40%/);
 });

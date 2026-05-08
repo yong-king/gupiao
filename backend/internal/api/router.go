@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"jijin/backend/internal/accounts"
 	"jijin/backend/internal/alerts"
 	"jijin/backend/internal/audit"
 	"jijin/backend/internal/auth"
@@ -13,6 +16,7 @@ import (
 	"jijin/backend/internal/holdings"
 	"jijin/backend/internal/marketdata"
 	"jijin/backend/internal/notifications"
+	"jijin/backend/internal/persistence"
 	"jijin/backend/internal/refresh"
 	"jijin/backend/internal/watchlist"
 )
@@ -31,7 +35,9 @@ type Server struct {
 	alertRules   *alerts.RuleRepository
 	alerts       *alerts.EventRepository
 	notifier     *notifications.Center
+	accounts     *accounts.Repository
 	auth         *auth.Service
+	store        *persistence.Store
 	cfg          config.Config
 	authRequired bool
 }
@@ -45,6 +51,12 @@ func NewServer(watchlists *watchlist.Repository, holdings *holdings.Repository) 
 func NewServerWithConfig(watchlists *watchlist.Repository, holdings *holdings.Repository, cfg config.Config) *Server {
 	server := NewServerWithProvider(watchlists, holdings, marketProviderFromConfig(cfg))
 	server.cfg = cfg
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if store, err := persistence.Open(ctx, cfg.DatabaseURL); err == nil {
+		server.store = store
+		server.auth.Store = store
+	}
 	return server
 }
 
@@ -59,6 +71,7 @@ func NewServerWithProvider(watchlists *watchlist.Repository, holdings *holdings.
 		alertRules: alerts.NewRuleRepository(),
 		alerts:     alerts.NewEventRepository(),
 		notifier:   notifications.NewCenter(),
+		accounts:   accounts.NewRepository(),
 		auth:       auth.NewService(),
 		cfg:        config.Default(),
 	}
@@ -96,6 +109,7 @@ func NewServerWithRefresh(watchlists *watchlist.Repository, holdings *holdings.R
 		alertRules: alerts.NewRuleRepository(),
 		alerts:     alerts.NewEventRepository(),
 		notifier:   notifications.NewCenter(),
+		accounts:   accounts.NewRepository(),
 		auth:       auth.NewService(),
 		cfg:        config.Default(),
 	}
@@ -122,6 +136,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/alert-rules", s.requireAuth(s.handleAlertRules))
 	mux.HandleFunc("/api/alerts", s.requireAuth(s.handleAlerts))
 	mux.HandleFunc("/api/notifications", s.requireAuth(s.handleNotifications))
+	mux.HandleFunc("/api/notifications/read", s.requireAuth(s.handleNotificationRead))
+	mux.HandleFunc("/api/accounts", s.requireAuth(s.handleAccounts))
 	mux.HandleFunc("/api/system/dependencies", s.requireAuth(s.handleSystemDependencies))
 	return withCORS(mux)
 }

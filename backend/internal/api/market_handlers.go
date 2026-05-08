@@ -44,10 +44,17 @@ func (s *Server) handleMarketCollect(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
 		return
 	}
+	if s.store != nil {
+		if err := s.store.SaveSnapshots(snapshots); err != nil {
+			WriteError(w, http.StatusInternalServerError, "storage_error", err.Error(), requestID(r))
+			return
+		}
+	}
+	allSnapshots := s.listSnapshots(market, symbol)
 	writeJSON(w, http.StatusOK, collectMarketResponse{
 		Snapshot:     snapshots[0],
-		DailyChanges: s.refreshes.Snapshots.DailyChanges(market, symbol),
-		Profile:      marketdata.ProfileFromSnapshots(market, symbol, s.refreshes.Snapshots.ListBySymbol(market, symbol)),
+		DailyChanges: dailyChangesFromSnapshots(allSnapshots),
+		Profile:      marketdata.ProfileFromSnapshots(market, symbol, allSnapshots),
 	})
 }
 
@@ -60,7 +67,7 @@ func (s *Server) handleMarketSnapshots(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.refreshes.Snapshots.ListBySymbol(market, symbol))
+	writeJSON(w, http.StatusOK, s.listSnapshots(market, symbol))
 }
 
 func (s *Server) handleDailyChanges(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +79,7 @@ func (s *Server) handleDailyChanges(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.refreshes.Snapshots.DailyChanges(market, symbol))
+	writeJSON(w, http.StatusOK, dailyChangesFromSnapshots(s.listSnapshots(market, symbol)))
 }
 
 func (s *Server) handleStockProfile(w http.ResponseWriter, r *http.Request) {
@@ -84,8 +91,26 @@ func (s *Server) handleStockProfile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	snapshots := s.refreshes.Snapshots.ListBySymbol(market, symbol)
+	snapshots := s.listSnapshots(market, symbol)
 	writeJSON(w, http.StatusOK, marketdata.ProfileFromSnapshots(market, symbol, snapshots))
+}
+
+func (s *Server) listSnapshots(market string, symbol string) []marketdata.Snapshot {
+	if s.store != nil {
+		if snapshots, err := s.store.ListSnapshots(market, symbol); err == nil {
+			return snapshots
+		}
+	}
+	return s.refreshes.Snapshots.ListBySymbol(market, symbol)
+}
+
+func dailyChangesFromSnapshots(snapshots []marketdata.Snapshot) []marketdata.DailyChange {
+	repo := marketdata.NewSnapshotRepository()
+	_ = repo.SaveAll(snapshots)
+	if len(snapshots) == 0 {
+		return nil
+	}
+	return repo.DailyChanges(snapshots[0].Market, snapshots[0].Symbol)
 }
 
 func marketSymbolQuery(w http.ResponseWriter, r *http.Request) (string, string, bool) {

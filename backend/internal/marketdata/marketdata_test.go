@@ -3,6 +3,8 @@ package marketdata
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -55,6 +57,32 @@ AAPL.US,APPLE INC,2026-05-06,15:53:31,281.915,285.39,281.07,285.37,3432889
 	}
 	if got.ChangePercent <= 0 {
 		t.Fatalf("expected positive change percent, got %#v", got)
+	}
+}
+
+func TestFetchEastmoneyQuote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("secid"); got != "0.000821" {
+			t.Fatalf("unexpected secid %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rc":0,"data":{"f43":1054,"f44":1067,"f45":1031,"f46":1031,"f47":138362,"f57":"000821","f58":"ST京机","f60":1029,"f86":1778139288}}`))
+	}))
+	defer server.Close()
+
+	oldURL := eastmoneyQuoteURL
+	eastmoneyQuoteURL = server.URL
+	defer func() { eastmoneyQuoteURL = oldURL }()
+
+	got, err := FetchEastmoneyQuote(context.Background(), QuoteRequest{Market: "CN", Symbol: "000821"}, server.Client())
+	if err != nil {
+		t.Fatalf("fetch eastmoney quote: %v", err)
+	}
+	if got.Market != "CN" || got.Symbol != "000821" || got.Name != "ST京机" || got.Price != 10.54 || got.Source != "eastmoney" {
+		t.Fatalf("unexpected snapshot: %#v", got)
+	}
+	if got.Volume != 13836200 || got.ChangePercent <= 0 {
+		t.Fatalf("unexpected derived values: %#v", got)
 	}
 }
 

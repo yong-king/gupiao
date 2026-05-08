@@ -168,6 +168,45 @@ func (r *Repository) ReplaceForUser(userID string, holdings []Holding) error {
 	return nil
 }
 
+func (r *Repository) Upsert(holding Holding) (Holding, error) {
+	holding = holding.Normalized()
+	if err := holding.Validate(); err != nil {
+		return Holding{}, err
+	}
+	now := time.Now().UTC()
+	if holding.CreatedAt.IsZero() {
+		holding.CreatedAt = now
+	}
+	holding.UpdatedAt = now
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := append([]Holding(nil), r.holdings[holding.UserID]...)
+	for i, existing := range items {
+		if existing.Market == holding.Market && existing.Symbol == holding.Symbol {
+			items[i] = holding
+			r.holdings[holding.UserID] = items
+			return holding, nil
+		}
+	}
+	r.holdings[holding.UserID] = append(items, holding)
+	return holding, nil
+}
+
+func (r *Repository) Delete(userID string, market string, symbol string) bool {
+	normalized := Holding{UserID: userID, Market: market, Symbol: symbol}.Normalized()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := append([]Holding(nil), r.holdings[userID]...)
+	for i, existing := range items {
+		if existing.Market == normalized.Market && existing.Symbol == normalized.Symbol {
+			r.holdings[userID] = append(items[:i], items[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Repository) ListByUser(userID string) []Holding {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

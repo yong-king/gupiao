@@ -35,3 +35,10 @@ func TestPublishListAndMarkRead(t *testing.T) {
 		t.Fatal("expected message to be read")
 	}
 }
+
+func TestMarkReadRejectsMissingMessage(t *testing.T) {
+	center := NewCenter()
+	if err := center.MarkRead("missing"); err == nil {
+		t.Fatal("expected missing message to fail")
+	}
+}

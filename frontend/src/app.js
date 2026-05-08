@@ -12,18 +12,18 @@ export const navItems = [
 export const viewCopy = {
   watchlists: {
     title: "股票池",
-    description: "维护需要持续观察的股票代码，刷新任务会基于股票池采集行情。",
-    empty: "还没有股票池。先创建 Demo 股票池并加入 AAPL。",
+    description: "创建多个自定义股票池，维护需要持续观察的股票代码和关注价。",
+    empty: "还没有股票池。先新建一个股票池，再加入要监控的代码。",
   },
   holdings: {
     title: "持仓",
-    description: "导入只读持仓数据，用于风险提示和组合分析。",
-    empty: "还没有导入持仓。可以先导入 Demo CSV。",
+    description: "维护真实或手工录入的持仓，用于风险提醒和组合分析。",
+    empty: "还没有持仓。可以从股票池选择代码，也可以手动新增。",
   },
   rules: {
     title: "提醒规则",
     description: "配置观察型买入、卖出和风险提醒阈值，不包含自动下单。",
-    empty: "还没有提醒规则。可以先创建 AAPL 价格提醒。",
+    empty: "还没有提醒规则。请选择持仓或股票池代码创建规则。",
   },
   refresh: {
     title: "刷新任务",
@@ -42,8 +42,8 @@ export const viewCopy = {
   },
   accounts: {
     title: "账户监控",
-    description: "管理只读账户接入状态。MVP 不保存券商交易密码，不做自动登录。",
-    empty: "暂未接入真实账户，当前使用手动导入和股票代码监控。",
+    description: "管理同花顺、东方财富、雪球等外部工具的只读接入配置。",
+    empty: "当前只保存只读接入配置，不保存交易密码，也不做自动交易。",
   },
   settings: {
     title: "系统设置",

@@ -62,3 +62,33 @@ func TestRepositoryReplaceAndListByUser(t *testing.T) {
 		t.Fatalf("expected no holdings for other user, got %d", len(other))
 	}
 }
+
+func TestRepositoryUpsert(t *testing.T) {
+	repo := NewRepository()
+	if _, err := repo.Upsert(Holding{UserID: "user-1", Market: "us", Symbol: "aapl", Quantity: 10, CostBasis: 150}); err != nil {
+		t.Fatalf("upsert holding: %v", err)
+	}
+	if _, err := repo.Upsert(Holding{UserID: "user-1", Market: "US", Symbol: "AAPL", Quantity: 12, CostBasis: 145}); err != nil {
+		t.Fatalf("update holding: %v", err)
+	}
+	got := repo.ListByUser("user-1")
+	if len(got) != 1 || got[0].Quantity != 12 || got[0].CostBasis != 145 {
+		t.Fatalf("expected updated holding, got %#v", got)
+	}
+}
+
+func TestRepositoryDelete(t *testing.T) {
+	repo := NewRepository()
+	if _, err := repo.Upsert(Holding{UserID: "user-1", Market: "CN", Symbol: "000821", Quantity: 100, CostBasis: 8}); err != nil {
+		t.Fatalf("upsert holding: %v", err)
+	}
+	if !repo.Delete("user-1", "cn", "000821") {
+		t.Fatal("expected delete to succeed")
+	}
+	if repo.Delete("user-1", "CN", "000821") {
+		t.Fatal("expected second delete to report not found")
+	}
+	if got := repo.ListByUser("user-1"); len(got) != 0 {
+		t.Fatalf("expected no holdings, got %#v", got)
+	}
+}

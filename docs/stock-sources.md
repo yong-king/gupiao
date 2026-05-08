@@ -17,3 +17,10 @@ MVP parser support:
 
 - JSON payloads with `market`, `symbol`, `price`, `previous_close`, `change_percent`, `volume`, `source`, `data_time`.
 - Simple HTML elements using `data-*` attributes.
+
+Current quote providers:
+
+- `US` and `HK`: Stooq CSV quote endpoint.
+- `CN`: Eastmoney quote endpoint. Example: `CN:000821` maps to Eastmoney `secid=0.000821`.
+
+Provider data is used only for monitoring and research. It is not a trading instruction and does not submit orders.

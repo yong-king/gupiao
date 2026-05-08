@@ -110,22 +110,34 @@ type Service struct {
 	Users    *UserRepository
 	Sessions *SessionRepository
 	TTL      time.Duration
+	Store    Store
 }
 
 func NewService() *Service {
 	return &Service{Users: NewUserRepository(), Sessions: NewSessionRepository(), TTL: 24 * time.Hour}
 }
 
+type Store interface {
+	SaveUser(User) error
+	FindUserByEmail(string) (User, bool)
+	FindUserByID(string) (User, bool)
+	SaveSession(Session) error
+	FindSessionByTokenHash(string) (Session, bool)
+}
+
 func (s *Service) Register(id string, email string, password string) (string, User, error) {
 	if len(password) < 8 {
 		return "", User{}, errors.New("password must be at least 8 characters")
+	}
+	if existing, ok := s.findUserByEmail(email); ok && existing.ID != id {
+		return "", User{}, errors.New("email already registered")
 	}
 	hash, err := HashPassword(password)
 	if err != nil {
 		return "", User{}, err
 	}
 	user := User{ID: id, Email: normalizeEmail(email), PasswordHash: hash}
-	if err := s.Users.Save(user); err != nil {
+	if err := s.saveUser(user); err != nil {
 		return "", User{}, err
 	}
 	token, err := s.createSession(user.ID)
@@ -133,7 +145,7 @@ func (s *Service) Register(id string, email string, password string) (string, Us
 }
 
 func (s *Service) Login(email string, password string) (string, User, error) {
-	user, ok := s.Users.FindByEmail(email)
+	user, ok := s.findUserByEmail(email)
 	if !ok || !VerifyPassword(password, user.PasswordHash) {
 		return "", User{}, errors.New("invalid email or password")
 	}
@@ -142,11 +154,11 @@ func (s *Service) Login(email string, password string) (string, User, error) {
 }
 
 func (s *Service) Authenticate(token string) (User, bool) {
-	session, ok := s.Sessions.FindByToken(token)
+	session, ok := s.findSessionByToken(token)
 	if !ok {
 		return User{}, false
 	}
-	return s.Users.FindByID(session.UserID)
+	return s.findUserByID(session.UserID)
 }
 
 func (s *Service) createSession(userID string) (string, error) {
@@ -154,7 +166,47 @@ func (s *Service) createSession(userID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return token, s.Sessions.Save(Session{UserID: userID, TokenHash: HashToken(token), ExpiresAt: time.Now().UTC().Add(s.TTL)})
+	return token, s.saveSession(Session{UserID: userID, TokenHash: HashToken(token), ExpiresAt: time.Now().UTC().Add(s.TTL)})
+}
+
+func (s *Service) saveUser(user User) error {
+	if s.Store != nil {
+		return s.Store.SaveUser(user)
+	}
+	return s.Users.Save(user)
+}
+
+func (s *Service) findUserByEmail(email string) (User, bool) {
+	if s.Store != nil {
+		return s.Store.FindUserByEmail(email)
+	}
+	return s.Users.FindByEmail(email)
+}
+
+func (s *Service) findUserByID(id string) (User, bool) {
+	if s.Store != nil {
+		return s.Store.FindUserByID(id)
+	}
+	return s.Users.FindByID(id)
+}
+
+func (s *Service) saveSession(session Session) error {
+	if s.Store != nil {
+		return s.Store.SaveSession(session)
+	}
+	return s.Sessions.Save(session)
+}
+
+func (s *Service) findSessionByToken(token string) (Session, bool) {
+	hash := HashToken(token)
+	if s.Store != nil {
+		session, ok := s.Store.FindSessionByTokenHash(hash)
+		if !ok || time.Now().UTC().After(session.ExpiresAt) {
+			return Session{}, false
+		}
+		return session, true
+	}
+	return s.Sessions.FindByToken(token)
 }
 
 func HashPassword(password string) (string, error) {

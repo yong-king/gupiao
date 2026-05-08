@@ -82,3 +82,50 @@ func TestHoldingsImportAPI(t *testing.T) {
 		t.Fatalf("unexpected audit entries: %#v", audits)
 	}
 }
+
+func TestHoldingsUpsertAPI(t *testing.T) {
+	server := NewServer(watchlist.NewRepository(), holdings.NewRepository())
+	body := `{"user_id":"user-1","market":"US","symbol":"AAPL","quantity":10,"cost_basis":150}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/holdings", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected upsert status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/holdings?user_id=user-1", nil)
+	listRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d", http.StatusOK, listRec.Code)
+	}
+	var got []holdings.Holding
+	if err := json.NewDecoder(listRec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode holdings: %v", err)
+	}
+	if len(got) != 1 || got[0].Symbol != "AAPL" || got[0].Quantity != 10 {
+		t.Fatalf("unexpected holdings: %#v", got)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/holdings?user_id=user-1&market=US&symbol=AAPL", nil)
+	deleteRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected delete status %d, got %d: %s", http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+	}
+
+	emptyReq := httptest.NewRequest(http.MethodGet, "/api/holdings?user_id=user-1", nil)
+	emptyRec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(emptyRec, emptyReq)
+	if emptyRec.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d", http.StatusOK, emptyRec.Code)
+	}
+	var empty []holdings.Holding
+	if err := json.NewDecoder(emptyRec.Body).Decode(&empty); err != nil {
+		t.Fatalf("decode holdings: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected holdings to be deleted, got %#v", empty)
+	}
+}

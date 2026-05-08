@@ -42,14 +42,15 @@ func ProfileFromSnapshots(market string, symbol string, snapshots []Snapshot) Co
 func EnrichKnownProfile(profile CompanyProfile) CompanyProfile {
 	key := strings.ToUpper(strings.TrimSpace(profile.Symbol))
 	known := map[string]CompanyProfile{
-		"AAPL":  {Sector: "Consumer Electronics", Products: []string{"iPhone", "Mac", "iPad", "Wearables", "Services"}, Business: "Apple sells consumer devices, software, and services."},
-		"MSFT":  {Sector: "Software and Cloud", Products: []string{"Azure", "Microsoft 365", "Windows", "GitHub", "Xbox"}, Business: "Microsoft sells cloud infrastructure, productivity software, operating systems, and gaming services."},
-		"NVDA":  {Sector: "Semiconductors", Products: []string{"GPU", "AI accelerators", "Networking", "CUDA"}, Business: "NVIDIA designs accelerated computing chips, systems, and software used in AI, graphics, and data centers."},
-		"TSLA":  {Sector: "Automotive and Energy", Products: []string{"Electric vehicles", "Battery storage", "Charging", "Energy generation"}, Business: "Tesla sells electric vehicles, charging services, and energy products."},
-		"AMZN":  {Sector: "E-commerce and Cloud", Products: []string{"Amazon Marketplace", "AWS", "Prime", "Advertising"}, Business: "Amazon operates online commerce, cloud infrastructure, subscriptions, logistics, and advertising businesses."},
-		"GOOGL": {Sector: "Internet Services", Products: []string{"Search", "YouTube", "Google Cloud", "Android", "Ads"}, Business: "Alphabet sells digital advertising, cloud services, subscriptions, devices, and platform services."},
-		"META":  {Sector: "Internet Services", Products: []string{"Facebook", "Instagram", "WhatsApp", "Reality Labs", "Ads"}, Business: "Meta operates social apps, advertising systems, messaging, and metaverse hardware/software initiatives."},
-		"0700":  {Sector: "Internet Services", Products: []string{"WeChat", "Online games", "FinTech", "Cloud", "Advertising"}, Business: "Tencent operates social platforms, games, digital content, fintech, cloud, and advertising businesses."},
+		"AAPL":   {Sector: "Consumer Electronics", Products: []string{"iPhone", "Mac", "iPad", "Wearables", "Services"}, Business: "Apple sells consumer devices, software, and services."},
+		"MSFT":   {Sector: "Software and Cloud", Products: []string{"Azure", "Microsoft 365", "Windows", "GitHub", "Xbox"}, Business: "Microsoft sells cloud infrastructure, productivity software, operating systems, and gaming services."},
+		"NVDA":   {Sector: "Semiconductors", Products: []string{"GPU", "AI accelerators", "Networking", "CUDA"}, Business: "NVIDIA designs accelerated computing chips, systems, and software used in AI, graphics, and data centers."},
+		"TSLA":   {Sector: "Automotive and Energy", Products: []string{"Electric vehicles", "Battery storage", "Charging", "Energy generation"}, Business: "Tesla sells electric vehicles, charging services, and energy products."},
+		"AMZN":   {Sector: "E-commerce and Cloud", Products: []string{"Amazon Marketplace", "AWS", "Prime", "Advertising"}, Business: "Amazon operates online commerce, cloud infrastructure, subscriptions, logistics, and advertising businesses."},
+		"GOOGL":  {Sector: "Internet Services", Products: []string{"Search", "YouTube", "Google Cloud", "Android", "Ads"}, Business: "Alphabet sells digital advertising, cloud services, subscriptions, devices, and platform services."},
+		"META":   {Sector: "Internet Services", Products: []string{"Facebook", "Instagram", "WhatsApp", "Reality Labs", "Ads"}, Business: "Meta operates social apps, advertising systems, messaging, and metaverse hardware/software initiatives."},
+		"0700":   {Sector: "Internet Services", Products: []string{"WeChat", "Online games", "FinTech", "Cloud", "Advertising"}, Business: "Tencent operates social platforms, games, digital content, fintech, cloud, and advertising businesses."},
+		"000821": {Sector: "High-end Equipment", Products: []string{"Photovoltaic equipment", "Packaging machinery", "Automation equipment"}, Business: "J.S. Machine develops equipment businesses including photovoltaic intelligent equipment, packaging machinery, and automation systems."},
 	}
 	if item, ok := known[key]; ok {
 		if profile.Sector == "" {
