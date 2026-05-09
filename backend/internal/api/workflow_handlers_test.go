@@ -61,7 +61,7 @@ func TestAssistantChatUsesHoldingContext(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Market != "CN" || !strings.Contains(payload.ContextSummary, "持仓数量") || !strings.Contains(payload.Answer, "不是买卖指令") {
+	if payload.Market != "CN" || !strings.Contains(payload.ContextSummary, "持仓数量") || !strings.Contains(payload.Answer, "不构成买卖指令") {
 		t.Fatalf("unexpected assistant response: %#v", payload)
 	}
 }

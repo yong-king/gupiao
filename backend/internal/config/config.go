@@ -13,6 +13,7 @@ type Config struct {
 	AgentURL     string        `json:"agent_url"`
 	Auth         AuthConfig    `json:"auth"`
 	LLM          LLMConfig     `json:"llm"`
+	Cadence      CadenceConfig `json:"cadence"`
 	Repository   RepoConfig    `json:"repository"`
 	StockSources []StockSource `json:"stock_sources"`
 }
@@ -29,6 +30,11 @@ type LLMConfig struct {
 	FlashModel string `json:"flash_model"`
 	ProModel   string `json:"pro_model"`
 	APIKeyEnv  string `json:"api_key_env"`
+}
+
+type CadenceConfig struct {
+	ProductResearch map[string]string `json:"product_research"`
+	RealtimeQuote   map[string]string `json:"realtime_quote"`
 }
 
 type RepoConfig struct {
@@ -61,6 +67,10 @@ func Default() Config {
 			FlashModel: "deepseek-v4-flash",
 			ProModel:   "deepseek-v4-pro",
 			APIKeyEnv:  "DEEPSEEK_API_KEY",
+		},
+		Cadence: CadenceConfig{
+			ProductResearch: map[string]string{"high": "1h", "medium": "2h", "low": "4h"},
+			RealtimeQuote:   map[string]string{"high": "2m", "medium": "5m", "low": "10m"},
 		},
 		Repository: RepoConfig{
 			RemoteURL:       "",
@@ -115,4 +125,28 @@ func applyEnv(cfg *Config) {
 	if value := os.Getenv("REPOSITORY_BRANCH"); value != "" {
 		cfg.Repository.Branch = value
 	}
+}
+
+func (c Config) ProductResearchInterval(level string) time.Duration {
+	return durationForAttention(c.Cadence.ProductResearch, level, map[string]string{"high": "1h", "medium": "2h", "low": "4h"})
+}
+
+func (c Config) RealtimeQuoteInterval(level string) time.Duration {
+	return durationForAttention(c.Cadence.RealtimeQuote, level, map[string]string{"high": "2m", "medium": "5m", "low": "10m"})
+}
+
+func durationForAttention(values map[string]string, level string, defaults map[string]string) time.Duration {
+	key := level
+	if key != "high" && key != "low" {
+		key = "medium"
+	}
+	raw := values[key]
+	if raw == "" {
+		raw = defaults[key]
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		duration, _ = time.ParseDuration(defaults[key])
+	}
+	return duration
 }

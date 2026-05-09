@@ -13,6 +13,10 @@ TASK_MODELS = {
     "rag_vector_write": "chat_model",
 }
 
+# 当前 LangGraph 工作流包含 5 个节点，也对应 5 个智能体：
+# 行情上下文采集、公司产品采集、归纳整理、风险审查、RAG/向量写入。
+# 不同节点按业务风险路由到不同 DeepSeek 模型。
+
 
 @dataclass
 class ResearchState:
@@ -21,7 +25,7 @@ class ResearchState:
     market: str
     symbol: str
     attention_level: str = "medium"
-    interval: str = "6h"
+    interval: str = "2h"
     profile: Dict[str, Any] = field(default_factory=dict)
     latest_snapshot: Dict[str, Any] = field(default_factory=dict)
     snapshots_count: int = 0
@@ -43,7 +47,7 @@ def run_research_workflow(payload: Dict[str, Any], cfg: Config) -> Dict[str, Any
         market=str(payload.get("market", "CN")).upper(),
         symbol=str(payload.get("symbol", "")).upper(),
         attention_level=str(payload.get("attention_level", "medium")),
-        interval=str(payload.get("interval", "6h")),
+        interval=str(payload.get("interval", "2h")),
         profile=dict(payload.get("profile") or {}),
         latest_snapshot=dict(payload.get("latest_snapshot") or {}),
         snapshots_count=int(payload.get("snapshots_count") or 0),
@@ -66,6 +70,7 @@ def _run_langgraph(initial: ResearchState, cfg: Config) -> Tuple[ResearchState, 
     try:
         from langgraph.graph import END, StateGraph
 
+        # 运行时如果已安装 langgraph，就构建真实节点图；否则走同一批节点函数的顺序兜底。
         graph = StateGraph(ResearchState)
         graph.add_node("market_context_collect", lambda state: market_context_collect(state, cfg))
         graph.add_node("company_product_collect", lambda state: company_product_collect(state, cfg))
@@ -180,7 +185,7 @@ def _state_from_dict(value: Dict[str, Any]) -> ResearchState:
         market=str(value.get("market", "CN")).upper(),
         symbol=str(value.get("symbol", "")).upper(),
         attention_level=str(value.get("attention_level", "medium")),
-        interval=str(value.get("interval", "6h")),
+        interval=str(value.get("interval", "2h")),
         profile=dict(value.get("profile") or {}),
         latest_snapshot=dict(value.get("latest_snapshot") or {}),
         snapshots_count=int(value.get("snapshots_count") or 0),

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -37,6 +38,9 @@ func (s *Server) handleMarketCollect(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshots, err := s.refreshes.Provider.FetchQuotes(r.Context(), []marketdata.QuoteRequest{{Market: market, Symbol: symbol}})
 	if err != nil {
+		s.saveOperationLog(persistenceOperationLog("", market, symbol, "crawler_quote_collect", "market_provider", "", fmt.Sprintf("抓取实时行情 %s:%s", market, symbol), "行情源返回错误："+err.Error(), map[string]string{
+			"status": "failed",
+		}))
 		WriteError(w, http.StatusBadGateway, "provider_error", err.Error(), requestID(r))
 		return
 	}
@@ -51,6 +55,10 @@ func (s *Server) handleMarketCollect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	allSnapshots := s.listSnapshots(market, symbol)
+	s.saveOperationLog(persistenceOperationLog("", market, symbol, "crawler_quote_collect", "market_provider", "", fmt.Sprintf("抓取实时行情 %s:%s", market, symbol), quoteOutputSummary(snapshots[0]), map[string]string{
+		"source":           snapshots[0].Source,
+		"provider_request": market + ":" + symbol,
+	}))
 	writeJSON(w, http.StatusOK, collectMarketResponse{
 		Snapshot:     snapshots[0],
 		DailyChanges: dailyChangesFromSnapshots(allSnapshots),
@@ -121,4 +129,8 @@ func marketSymbolQuery(w http.ResponseWriter, r *http.Request) (string, string, 
 		return "", "", false
 	}
 	return market, symbol, true
+}
+
+func quoteOutputSummary(snapshot marketdata.Snapshot) string {
+	return fmt.Sprintf("返回 %s:%s 最新价 %.2f，涨跌幅 %.2f%%，成交量 %d", snapshot.Market, snapshot.Symbol, snapshot.Price, snapshot.ChangePercent, snapshot.Volume)
 }

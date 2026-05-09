@@ -46,6 +46,7 @@
 23. [22 Portfolio Analysis Research RAG](</Users/youngking/Documents/jijin/plans/22-portfolio-analysis-research-rag.plan.md>)
 24. [23 Multi-Agent Research Assistant](</Users/youngking/Documents/jijin/plans/23-multi-agent-research-assistant.plan.md>)
 25. [24 LangGraph Agent Chat UX](</Users/youngking/Documents/jijin/plans/24-langgraph-agent-chat-ux.plan.md>)
+26. [25 Observability Cadence Report Detail](</Users/youngking/Documents/jijin/plans/25-observability-cadence-report-detail.plan.md>)
 
 ## Global Testing Rule
 

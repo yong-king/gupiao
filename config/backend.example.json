@@ -15,6 +15,18 @@
     "pro_model": "deepseek-v4-pro",
     "api_key_env": "DEEPSEEK_API_KEY"
   },
+  "cadence": {
+    "product_research": {
+      "high": "1h",
+      "medium": "2h",
+      "low": "4h"
+    },
+    "realtime_quote": {
+      "high": "2m",
+      "medium": "5m",
+      "low": "10m"
+    }
+  },
   "repository": {
     "remote_url": "",
     "branch": "main",

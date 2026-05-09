@@ -148,7 +148,7 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	}
 	profile := marketdata.ProfileFromSnapshots(target.Market, target.Symbol, snapshots)
 	latest := latestSnapshotForWorkflow(snapshots)
-	interval := holdings.AttentionRefreshInterval(target.AttentionLevel)
+	interval := s.cfg.ProductResearchInterval(target.AttentionLevel)
 	if document, steps, ok := s.runAgentResearchTarget(r, jobID, userID, target, profile, latest, len(snapshots), interval); ok {
 		return document, steps
 	}
@@ -187,6 +187,11 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	if s.store != nil {
 		for _, step := range steps {
 			_ = s.store.SaveWorkflowStep(step)
+			s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "ai_agent_step", step.AgentName, "local-fallback", step.InputSummary, step.OutputSummary, map[string]string{
+				"workflow_job_id": jobID,
+				"step_name":       step.StepName,
+				"agent_engine":    "go-local-fallback",
+			}))
 		}
 	}
 	return document, steps
@@ -259,7 +264,17 @@ func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID st
 			StartedAt:     started,
 			CompletedAt:   completed,
 		})
+		s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "ai_agent_step", step.AgentName, step.Model, step.InputSummary, step.OutputSummary, map[string]string{
+			"workflow_job_id": jobID,
+			"step_name":       step.StepName,
+			"agent_engine":    result.Engine,
+		}))
 	}
+	s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "rag_vector_write", "RAG/向量写入 Agent", metadata["model_summarize"], "写入 LangGraph 研究结果", content, map[string]string{
+		"workflow_job_id": jobID,
+		"rag_document_id": document.ID,
+		"agent_engine":    result.Engine,
+	}))
 	if s.store != nil {
 		for _, step := range steps {
 			_ = s.store.SaveWorkflowStep(step)
@@ -426,6 +441,10 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 		}
 	}
 	contextSummary := assistantContextSummary(holding, inPool, len(ragDocs), len(snapshots))
+	webResearch := assistantWebResearch(profile)
+	s.saveOperationLog(persistenceOperationLog(userID, market, symbol, "crawler_public_info_collect", "公开信息采集 Agent", s.cfg.LLM.FlashModel, "读取股票公开产品/业务信息并准备给助手综合分析", webResearch[0]["summary"].(string), map[string]string{
+		"source": "local_profile_public_context",
+	}))
 	history := []persistence.AssistantMessage{}
 	if s.store != nil {
 		if messages, err := s.store.ListAssistantMessages(userID, sessionID, market, symbol, 8); err == nil {
@@ -447,11 +466,17 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 			History:        assistantHistoryMaps(history),
 			RAGDocuments:   ragDocumentMaps(ragDocs),
 			Profile:        mapFromJSON(profile),
+			WebResearch:    webResearch,
 		}); err == nil {
 			answer = result.Answer
 			model = result.Model
 		}
 	}
+	s.saveOperationLog(persistenceOperationLog(userID, market, symbol, "ai_assistant_chat", "股票助手 Agent", model, strings.TrimSpace(req.Question), answer, map[string]string{
+		"session_id":       sessionID,
+		"rag_document_ids": strings.Join(ragIDs, ","),
+		"rag_count":        strconv.Itoa(len(ragDocs)),
+	}))
 	if s.store != nil {
 		_ = s.store.SaveAssistantMessage(persistence.AssistantMessage{
 			ID:             "chat-" + shortHash(userID+market+symbol+req.Question+time.Now().UTC().Format(time.RFC3339Nano)),
@@ -630,6 +655,12 @@ func ragDocumentMaps(documents []persistence.RAGDocument) []map[string]interface
 		})
 	}
 	return out
+}
+
+func assistantWebResearch(profile marketdata.CompanyProfile) []map[string]interface{} {
+	summary := fmt.Sprintf("公开信息摘要：%s；主要产品/业务：%s；业务描述：%s；已有分析：%s",
+		profile.Name, strings.Join(profile.Products, "、"), profile.Business, profile.Analysis)
+	return []map[string]interface{}{{"source": "profile_public_context", "summary": summary}}
 }
 
 func streamChunks(text string, size int) []string {

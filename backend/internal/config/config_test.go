@@ -40,3 +40,13 @@ func TestRepositoryEnvOverrides(t *testing.T) {
 		t.Fatalf("expected repository env override, got %#v", cfg.Repository)
 	}
 }
+
+func TestCadenceDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.ProductResearchInterval("high").String() != "1h0m0s" {
+		t.Fatalf("unexpected product cadence: %s", cfg.ProductResearchInterval("high"))
+	}
+	if cfg.RealtimeQuoteInterval("low").String() != "10m0s" {
+		t.Fatalf("unexpected quote cadence: %s", cfg.RealtimeQuoteInterval("low"))
+	}
+}

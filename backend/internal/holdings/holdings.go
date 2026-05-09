@@ -72,11 +72,11 @@ func NormalizeAttentionLevel(level string) string {
 func AttentionRefreshInterval(level string) time.Duration {
 	switch NormalizeAttentionLevel(level) {
 	case "high":
-		return 4 * time.Hour
+		return time.Hour
 	case "low":
-		return 24 * time.Hour
+		return 4 * time.Hour
 	default:
-		return 6 * time.Hour
+		return 2 * time.Hour
 	}
 }
 

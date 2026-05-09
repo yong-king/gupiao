@@ -57,7 +57,7 @@ func (s *Server) handleResearchCollect(w http.ResponseWriter, r *http.Request) {
 	if len(snapshots) > 0 {
 		snapshot = snapshots[len(snapshots)-1]
 	}
-	interval := holdings.AttentionRefreshInterval(attention)
+	interval := s.cfg.ProductResearchInterval(attention)
 	summary := researchSummary(profile, snapshot, attention, interval)
 	metadata := map[string]string{
 		"attention_level":  attention,
@@ -82,6 +82,11 @@ func (s *Server) handleResearchCollect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.saveOperationLog(persistenceOperationLog(userID, market, symbol, "crawler_product_collect", "profile_research", s.cfg.LLM.FlashModel, "采集公司/产品公开信息和已保存行情", summary, map[string]string{
+		"attention_level":  attention,
+		"refresh_interval": interval.String(),
+		"rag_document_id":  id,
+	}))
 	writeJSON(w, http.StatusOK, collectResearchResponse{
 		DocumentID:      id,
 		Market:          market,

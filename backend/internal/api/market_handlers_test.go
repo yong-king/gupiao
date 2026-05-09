@@ -85,7 +85,7 @@ func TestResearchCollectAPI(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode research response: %v", err)
 	}
-	if payload.AttentionLevel != "high" || !strings.Contains(payload.Summary, "4h0m0s") {
+	if payload.AttentionLevel != "high" || !strings.Contains(payload.Summary, "1h0m0s") {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 }

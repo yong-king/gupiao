@@ -75,6 +75,7 @@ type ChatRequest struct {
 	History        []map[string]interface{} `json:"history"`
 	RAGDocuments   []map[string]interface{} `json:"rag_documents"`
 	Profile        map[string]interface{}   `json:"profile"`
+	WebResearch    []map[string]interface{} `json:"web_research"`
 }
 
 type ChatResult struct {

@@ -59,6 +59,15 @@ Do not put the actual key in any JSON file. Set it in the shell or server secret
 export DEEPSEEK_API_KEY="..."
 ```
 
+Attention-level cadence is configured in backend JSON under `cadence`:
+
+- `cadence.product_research.high`: default `1h`
+- `cadence.product_research.medium`: default `2h`
+- `cadence.product_research.low`: default `4h`
+- `cadence.realtime_quote.high`: default `2m`
+- `cadence.realtime_quote.medium`: default `5m`
+- `cadence.realtime_quote.low`: default `10m`
+
 ## Local PostgreSQL And Redis
 
 Start middleware:

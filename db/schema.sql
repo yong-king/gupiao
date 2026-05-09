@@ -276,6 +276,20 @@ CREATE TABLE IF NOT EXISTS stock_assistant_messages (
     created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS operation_logs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
+    market TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL DEFAULT '',
+    operation_type TEXT NOT NULL,
+    component TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    input_summary TEXT NOT NULL DEFAULT '',
+    output_summary TEXT NOT NULL DEFAULT '',
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_watchlists_user_id ON watchlists(user_id);
 CREATE INDEX IF NOT EXISTS idx_holdings_user_id ON holdings(user_id);
 CREATE INDEX IF NOT EXISTS idx_price_snapshots_symbol_time ON price_snapshots(market, symbol, data_time DESC);
@@ -293,3 +307,5 @@ CREATE INDEX IF NOT EXISTS idx_agent_workflow_jobs_user_created ON agent_workflo
 CREATE INDEX IF NOT EXISTS idx_agent_workflow_steps_job ON agent_workflow_steps(job_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_stock_assistant_messages_user_symbol ON stock_assistant_messages(user_id, market, symbol, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_assistant_messages_session_symbol ON stock_assistant_messages(user_id, session_id, market, symbol, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_user_created ON operation_logs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_symbol_created ON operation_logs(market, symbol, created_at DESC);

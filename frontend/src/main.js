@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=25";
-import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=25";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=25";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=26";
+import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=26";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=26";
 
 const root = document.querySelector("#app");
 const STOCK_DETAIL_COOLDOWN_MS = 5 * 60 * 1000;
@@ -32,6 +32,7 @@ const state = {
   profile: null,
   dependencies: null,
   accountConfigs: [],
+  operationLogs: [],
   researchResult: null,
   workflows: [],
   workflowResult: null,
@@ -113,7 +114,6 @@ function renderActiveView() {
         <h2>${view.title}</h2>
         <p class="muted">${view.description}</p>
       </div>
-      <span class="safety-badge">只提醒，不自动交易</span>
     </section>
     ${renderViewBody(view)}
   `;
@@ -126,7 +126,9 @@ function renderViewBody(view) {
   if (state.activeView === "refresh") return renderRefreshView();
   if (state.activeView === "alerts") return renderAlertsView(view);
   if (state.activeView === "reports") return renderReportsView(view);
+  if (state.activeView === "stockDetail") return renderStockDetailView(view);
   if (state.activeView === "assistant") return renderAssistantView(view);
+  if (state.activeView === "logs") return renderLogsView(view);
   if (state.activeView === "accounts") return renderAccountsView();
   return renderSettingsView(view);
 }
@@ -250,9 +252,9 @@ function renderHoldingsView(view) {
         </div>
         <label>关注等级
           <select id="holding-attention">
-            <option value="high">高：4 小时采集一次</option>
-            <option value="medium" selected>中：6 小时采集一次</option>
-            <option value="low">低：1 天采集一次</option>
+            <option value="high">高：产品 1 小时 / 行情 2 分钟</option>
+            <option value="medium" selected>中：产品 2 小时 / 行情 5 分钟</option>
+            <option value="low">低：产品 4 小时 / 行情 10 分钟</option>
           </select>
         </label>
         <div class="actions">
@@ -419,6 +421,28 @@ function renderReportsView(view) {
     holding: item,
   })));
   const poolRows = renderAnalysisRows(selectedPoolSymbols);
+  return `
+    <section class="grid">
+      <article class="wide">
+        <h3>持仓今日涨跌</h3>
+        ${holdingRows || `<p>${view.empty}</p>`}
+        <button id="analyze-holdings" type="button">刷新持仓今日涨跌</button>
+      </article>
+      <article class="wide">
+        <h3>当前股票池今日涨跌</h3>
+        <p class="muted">当前股票池：${currentWatchlistName()}</p>
+        <div class="pill-row">${state.watchlists.map((item) => `<button class="pool-pill ${itemID(item) === state.selectedWatchlistID ? "active" : ""}" data-select-watchlist="${itemID(item)}" type="button">${escapeHTML(valueOf(item, "Name", "name") || itemID(item))}</button>`).join("")}</div>
+        ${poolRows || "<p>当前股票池还没有股票。</p>"}
+        <div class="actions">
+          <button id="collect-report-market" type="button">刷新当前选中股票行情</button>
+          <button id="load-market-analysis" type="button">加载当前选中股票已保存行情</button>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderStockDetailView(view) {
   const changes = state.dailyChanges.map((item) => `<li>${formatDailyChange(item)}</li>`).join("");
   const latestSnapshot = state.snapshots[state.snapshots.length - 1] || state.collected;
   const latestChange = state.dailyChanges[state.dailyChanges.length - 1];
@@ -426,15 +450,8 @@ function renderReportsView(view) {
   return `
     <section class="grid">
       <article class="wide">
-        <h3>持仓股票今日涨跌</h3>
-        ${holdingRows || `<p>${view.empty}</p>`}
-        <button id="analyze-holdings" type="button">刷新持仓今日涨跌</button>
-      </article>
-      <article class="wide">
-        <h3>股票池分析</h3>
-        <p class="muted">当前股票池：${currentWatchlistName()}</p>
-        <div class="pill-row">${state.watchlists.map((item) => `<button class="pool-pill ${itemID(item) === state.selectedWatchlistID ? "active" : ""}" data-select-watchlist="${itemID(item)}" type="button">${escapeHTML(valueOf(item, "Name", "name") || itemID(item))}</button>`).join("")}</div>
-        ${poolRows || "<p>当前股票池还没有股票。</p>"}
+        <h3>${state.selectedMarket}:${state.selectedSymbol} 详情</h3>
+        <p class="market-number">${summarizeMarketNumbers(latestSnapshot, latestChange)}</p>
         <div class="inline-form">
           ${renderStockPicker("analysis", false)}
           <button id="collect-report-market" type="button">采集并分析当前股票</button>
@@ -448,7 +465,7 @@ function renderReportsView(view) {
       </article>
       <article>
         <h3>关注等级 AI 工作流</h3>
-        <p class="muted">按持仓关注等级批量运行：高 4 小时、中 6 小时、低 1 天。每次会记录 Agent 步骤，写入 RAG 和本地向量。</p>
+        <p class="muted">产品信息采集周期来自配置：高 1 小时、中 2 小时、低 4 小时。每次会记录 Agent 步骤，写入 RAG 和本地向量。</p>
         <div class="actions">
           <button data-run-workflow="high" type="button">运行高关注</button>
           <button data-run-workflow="medium" type="button">运行中关注</button>
@@ -459,7 +476,6 @@ function renderReportsView(view) {
       </article>
       <article>
         <h3>详细曲线</h3>
-        <p class="market-number">${summarizeMarketNumbers(latestSnapshot, latestChange)}</p>
         ${renderPriceChart(state.snapshots)}
       </article>
       <article>
@@ -544,6 +560,34 @@ function renderAssistantView(view) {
   `;
 }
 
+function renderLogsView(view) {
+  const rows = state.operationLogs.map((item) => {
+    const metadata = valueOf(item, "Metadata", "metadata") || {};
+    const target = [valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol")].filter(Boolean).join(":") || "-";
+    return `<tr>
+      <td>${formatDateTime(valueOf(item, "CreatedAt", "created_at"))}</td>
+      <td>${operationTypeLabel(valueOf(item, "OperationType", "operation_type"))}</td>
+      <td>${target}</td>
+      <td>${escapeHTML(valueOf(item, "Component", "component") || "-")}</td>
+      <td>${escapeHTML(valueOf(item, "Model", "model") || "-")}</td>
+      <td>${escapeHTML(valueOf(item, "InputSummary", "input_summary") || "")}</td>
+      <td>${escapeHTML(valueOf(item, "OutputSummary", "output_summary") || "")}</td>
+      <td class="code">${escapeHTML(JSON.stringify(metadata))}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="grid">
+      <article class="wide">
+        <div class="panel-title">
+          <h3>调用日志</h3>
+          <button id="load-operation-logs" type="button">刷新日志</button>
+        </div>
+        ${state.operationLogs.length ? `<table class="stock-table log-table"><thead><tr><th>时间</th><th>类型</th><th>股票</th><th>组件</th><th>模型</th><th>输入</th><th>返回</th><th>元数据</th></tr></thead><tbody>${rows}</tbody></table>` : `<p>${view.empty}</p>`}
+      </article>
+    </section>
+  `;
+}
+
 function renderAccountsView() {
   const accounts = state.accountConfigs.map((item) => {
     const metadata = valueOf(item, "Metadata", "metadata") || {};
@@ -603,6 +647,7 @@ function renderSettingsView(view) {
         <p class="code">config/backend.example.json</p>
         <p class="code">agent/config/agent.example.json</p>
         <p class="code">deploy/docker-compose.yml</p>
+        <p class="muted">刷新周期在 backend 配置的 cadence 中维护：产品信息高/中/低为 1h/2h/4h，实时行情为 2m/5m/10m。</p>
         <p class="muted">${view.empty}</p>
       </article>
       <article>
@@ -641,7 +686,7 @@ function bindViewActions() {
   document.querySelector("#save-monitor-stock")?.addEventListener("click", saveMonitorStock);
   document.querySelectorAll("[data-load-stock]").forEach((button) => button.addEventListener("click", () => {
     const [market, symbol] = button.dataset.loadStock.split(":");
-    collectStockInfo(market, symbol);
+    collectStockInfo(market, symbol, { detail: true });
   }));
   document.querySelector("#load-watchlists")?.addEventListener("click", () => loadWatchlists(true));
   document.querySelector("#holding-source")?.addEventListener("change", fillHoldingFromSource);
@@ -673,6 +718,7 @@ function bindViewActions() {
     render();
   });
   document.querySelector("#load-workflows-assistant")?.addEventListener("click", () => loadWorkflows(true));
+  document.querySelector("#load-operation-logs")?.addEventListener("click", () => loadOperationLogs(true));
   document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
   document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
   document.querySelector("#load-dependencies")?.addEventListener("click", loadDependencies);
@@ -726,8 +772,9 @@ async function authenticate(mode) {
 }
 
 async function bootstrapUserData() {
-  await Promise.allSettled([loadWatchlists(false), loadHoldings(false), loadRules(false), loadAlerts(false), loadAccounts(false), loadWorkflows(false)]);
+  await Promise.allSettled([loadWatchlists(false), loadHoldings(false), loadRules(false), loadAlerts(false), loadAccounts(false), loadWorkflows(false), loadOperationLogs(false)]);
   await ensureDefaultWatchlist();
+  await loadKnownStockSnapshots(false);
 }
 
 async function createWatchlistFromForm() {
@@ -1172,6 +1219,16 @@ async function loadWorkflows(showMessage) {
   if (showMessage) render();
 }
 
+async function loadOperationLogs(showMessage) {
+  try {
+    state.operationLogs = asArray(await getJSON(`/api/operation-logs?user_id=${encodeURIComponent(state.userID)}&limit=100`, state.token));
+    if (showMessage) state.message = `已加载 ${state.operationLogs.length} 条调用日志。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
 async function askAssistant() {
   const market = document.querySelector("#assistant-market")?.value || state.selectedMarket;
   const symbol = (document.querySelector("#assistant-symbol")?.value || "").trim().toUpperCase();
@@ -1258,6 +1315,10 @@ async function streamAssistantChat(payload) {
 async function collectStockInfo(market, symbol, options = {}) {
   try {
     const result = await collectStockInfoData(market, symbol, options);
+    if (options.detail) {
+      state.activeView = "stockDetail";
+      window.localStorage.setItem("jijin_active_view", state.activeView);
+    }
     state.message = result.cached
       ? `${market}:${symbol} 已使用 ${Math.ceil(STOCK_DETAIL_COOLDOWN_MS / 60000)} 分钟内缓存，避免频繁请求数据源。`
       : `已获取 ${market}:${symbol} 行情和公司信息。`;
@@ -1309,6 +1370,25 @@ async function loadMarketAnalysisData() {
   state.dailyChanges = asArray(await getJSON(`/api/market/daily-changes?market=${market}&symbol=${symbol}`, state.token));
   state.profile = await getJSON(`/api/stocks/profile?market=${market}&symbol=${symbol}`, state.token);
   state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] = state.profile;
+}
+
+async function loadKnownStockSnapshots(showMessage) {
+  const targets = uniqueStocks([...state.holdings.map((item) => ({
+    market: valueOf(item, "Market", "market"),
+    symbol: valueOf(item, "Symbol", "symbol"),
+  })), ...allPoolSymbols()]).slice(0, 30);
+  for (const item of targets) {
+    const market = encodeURIComponent(item.market);
+    const symbol = encodeURIComponent(item.symbol);
+    const snapshots = asArray(await getJSON(`/api/market/snapshots?market=${market}&symbol=${symbol}`, state.token).catch(() => []));
+    if (snapshots.length) {
+      state.quoteByKey[stockKey(item.market, item.symbol)] = snapshots[snapshots.length - 1];
+    }
+  }
+  if (showMessage) {
+    state.message = `已加载 ${targets.length} 只股票的已保存行情。`;
+    render();
+  }
 }
 
 async function saveAccountConfig() {
@@ -1426,25 +1506,47 @@ function analysisTargets() {
 function renderAnalysisRows(items) {
   const rows = uniqueStocks(items).map((item) => {
     const key = stockKey(item.market, item.symbol);
-    const quote = state.quoteByKey[key];
+    const quote = quoteFor(item.market, item.symbol);
     const percent = Number(valueOf(quote, "ChangePercent", "change_percent") || 0);
     const cls = percent > 0 ? "cn-up" : percent < 0 ? "cn-down" : "muted";
     const sign = percent > 0 ? "+" : "";
+    const reminder = reminderText(item, quote);
     return `<tr>
       <td><button class="link-button" data-load-stock="${key}" type="button">${key}</button></td>
       <td>${item.source || "自选"}</td>
       <td>${quote ? formatPrice(valueOf(quote, "Price", "price")) : "未刷新"}</td>
       <td class="${cls}">${quote ? `${sign}${percent.toFixed(2)}%` : "-"}</td>
-      <td>${findHolding(item.market, item.symbol) ? holdingSummary(findHolding(item.market, item.symbol)) : "未持仓"}</td>
+      <td>${reminder}</td>
     </tr>`;
   }).join("");
   if (!rows) return "";
-  return `<table class="stock-table"><thead><tr><th>代码</th><th>来源</th><th>最新价</th><th>今日涨跌</th><th>持仓情况</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="stock-table"><thead><tr><th>代码</th><th>来源</th><th>最新价</th><th>今日涨跌</th><th>买入/卖出提醒</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function findHolding(market, symbol) {
   const key = stockKey(market, symbol);
   return state.holdings.find((item) => stockKey(valueOf(item, "Market", "market"), valueOf(item, "Symbol", "symbol")) === key);
+}
+
+function quoteFor(market, symbol) {
+  const key = stockKey(market, symbol);
+  if (state.quoteByKey[key]) return state.quoteByKey[key];
+  if (key === stockKey(state.selectedMarket, state.selectedSymbol)) {
+    return state.collected || state.snapshots[state.snapshots.length - 1] || null;
+  }
+  return null;
+}
+
+function reminderText(item, quote) {
+  const market = item.market;
+  const symbol = item.symbol;
+  const price = Number(valueOf(quote, "Price", "price") || 0);
+  const poolSymbol = currentSymbols().find((symbolItem) => stockKey(valueOf(symbolItem, "Market", "market"), valueOf(symbolItem, "Symbol", "symbol")) === stockKey(market, symbol));
+  const base = poolSymbol || item;
+  const text = monitorText(quote, base);
+  const rule = state.rules.find((ruleItem) => stockKey(valueOf(ruleItem, "Market", "market"), valueOf(ruleItem, "Symbol", "symbol")) === stockKey(market, symbol));
+  if (!rule || !price) return text;
+  return `${text}；规则：${ruleTypeLabel(valueOf(rule, "Type", "type"))} ${formatPrice(valueOf(rule, "Threshold", "threshold"))}`;
 }
 
 function holdingSummary(item) {

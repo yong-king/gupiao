@@ -79,6 +79,20 @@ type AssistantMessage struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type OperationLog struct {
+	ID            string            `json:"id"`
+	UserID        string            `json:"user_id"`
+	Market        string            `json:"market"`
+	Symbol        string            `json:"symbol"`
+	OperationType string            `json:"operation_type"`
+	Component     string            `json:"component"`
+	Model         string            `json:"model"`
+	InputSummary  string            `json:"input_summary"`
+	OutputSummary string            `json:"output_summary"`
+	Metadata      map[string]string `json:"metadata"`
+	CreatedAt     time.Time         `json:"created_at"`
+}
+
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, errors.New("database url is required")
@@ -695,6 +709,50 @@ func (s *Store) ListAssistantMessages(userID string, sessionID string, market st
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SaveOperationLog(log OperationLog) error {
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now().UTC()
+	}
+	if log.Metadata == nil {
+		log.Metadata = map[string]string{}
+	}
+	metadata, err := json.Marshal(log.Metadata)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO operation_logs(id,user_id,market,symbol,operation_type,component,model,input_summary,output_summary,metadata,created_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (id) DO UPDATE SET output_summary=EXCLUDED.output_summary,metadata=EXCLUDED.metadata`,
+		log.ID, log.UserID, log.Market, log.Symbol, log.OperationType, log.Component, log.Model, log.InputSummary, log.OutputSummary, string(metadata), log.CreatedAt)
+	return err
+}
+
+func (s *Store) ListOperationLogs(userID string, limit int) ([]OperationLog, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,user_id,market,symbol,operation_type,component,model,input_summary,output_summary,metadata,created_at
+		FROM operation_logs
+		WHERE user_id=$1 OR user_id=''
+		ORDER BY created_at DESC
+		LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OperationLog{}
+	for rows.Next() {
+		var log OperationLog
+		var metadata string
+		if err := rows.Scan(&log.ID, &log.UserID, &log.Market, &log.Symbol, &log.OperationType, &log.Component, &log.Model, &log.InputSummary, &log.OutputSummary, &metadata, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(metadata), &log.Metadata)
+		out = append(out, log)
 	}
 	return out, rows.Err()
 }
