@@ -42,7 +42,15 @@ func (p *StooqProvider) FetchQuotes(ctx context.Context, requests []QuoteRequest
 
 func (p *StooqProvider) FetchQuote(ctx context.Context, request QuoteRequest) (Snapshot, error) {
 	if strings.EqualFold(strings.TrimSpace(request.Market), "CN") {
-		return FetchEastmoneyQuote(ctx, request, p.client())
+		snapshot, err := FetchEastmoneyQuote(ctx, request, p.client())
+		if err == nil {
+			return snapshot, nil
+		}
+		fallback, fallbackErr := FetchTencentQuote(ctx, request, p.client())
+		if fallbackErr != nil {
+			return Snapshot{}, fmt.Errorf("eastmoney failed: %v; tencent failed: %w", err, fallbackErr)
+		}
+		return fallback, nil
 	}
 	u, err := url.Parse(p.BaseURL)
 	if err != nil {

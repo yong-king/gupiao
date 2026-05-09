@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=26";
-import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=26";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=26";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=27";
+import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=27";
+import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=27";
 
 const root = document.querySelector("#app");
 const STOCK_DETAIL_COOLDOWN_MS = 5 * 60 * 1000;
@@ -1319,11 +1319,11 @@ async function collectStockInfo(market, symbol, options = {}) {
       state.activeView = "stockDetail";
       window.localStorage.setItem("jijin_active_view", state.activeView);
     }
-    state.message = result.cached
+    state.message = result.warning || (result.cached
       ? `${market}:${symbol} 已使用 ${Math.ceil(STOCK_DETAIL_COOLDOWN_MS / 60000)} 分钟内缓存，避免频繁请求数据源。`
-      : `已获取 ${market}:${symbol} 行情和公司信息。`;
+      : `已获取 ${market}:${symbol} 行情和公司信息。`);
   } catch (error) {
-    state.message = error.message;
+    state.message = marketSourceErrorMessage(error.message);
   }
   render();
 }
@@ -1350,7 +1350,7 @@ async function collectStockInfoData(market, symbol, options = {}) {
   state.dailyChanges = asArray(data.daily_changes || data.DailyChanges);
   state.profile = data.profile || data.Profile || null;
   state.profileByKey[key] = state.profile;
-  return { cached: false };
+  return { cached: false, warning: data.warning || data.Warning || "" };
 }
 
 async function loadMarketAnalysis() {
@@ -1642,6 +1642,31 @@ function signalLabel(signal) {
 
 function riskLabel(risk) {
   return { low: "低", medium: "中", high: "高", critical: "严重" }[risk] || risk || "低";
+}
+
+function operationTypeLabel(type) {
+  return {
+    crawler_quote_collect: "行情采集",
+    crawler_public_info_collect: "公开信息采集",
+    crawler_product_collect: "产品信息采集",
+    ai_agent_step: "AI 工作流",
+    ai_assistant_chat: "股票助手",
+    rag_vector_write: "RAG/向量写入",
+  }[type] || type || "-";
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function marketSourceErrorMessage(message) {
+  if (/eastmoney|push2\.eastmoney|EOF|provider/i.test(message || "")) {
+    return "行情源暂时不可用，稍后再试；如果已有保存行情，页面会继续显示最近一次数据。";
+  }
+  return message;
 }
 
 function attentionLabel(level) {

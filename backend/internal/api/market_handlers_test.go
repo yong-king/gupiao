@@ -65,6 +65,33 @@ func TestMarketCollectAPI(t *testing.T) {
 	}
 }
 
+func TestMarketCollectFallsBackToSavedSnapshot(t *testing.T) {
+	provider := marketdata.NewMockProvider()
+	provider.SetError(assertiveError("eastmoney EOF"))
+	snapshots := marketdata.NewSnapshotRepository()
+	if err := snapshots.SaveAll([]marketdata.Snapshot{{
+		Market: "CN", Symbol: "000821", Name: "京山轻机", Price: 10.71, PreviousClose: 10.50, ChangePercent: 2, Source: "saved", DataTime: time.Date(2026, 5, 9, 9, 30, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+	service := refresh.NewService(provider, snapshots, refresh.NewJobRepository())
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdings.NewRepository(), service)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/market/collect", strings.NewReader(`{"market":"CN","symbol":"000821"}`))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected fallback status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var payload collectMarketResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode collect response: %v", err)
+	}
+	if payload.Snapshot.Price != 10.71 || payload.Warning == "" {
+		t.Fatalf("expected saved quote fallback, got %#v", payload)
+	}
+}
+
 func TestResearchCollectAPI(t *testing.T) {
 	snapshots := marketdata.NewSnapshotRepository()
 	if err := snapshots.SaveAll([]marketdata.Snapshot{{
@@ -88,4 +115,10 @@ func TestResearchCollectAPI(t *testing.T) {
 	if payload.AttentionLevel != "high" || !strings.Contains(payload.Summary, "1h0m0s") {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
+}
+
+type assertiveError string
+
+func (e assertiveError) Error() string {
+	return string(e)
 }

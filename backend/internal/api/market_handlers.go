@@ -18,6 +18,7 @@ type collectMarketResponse struct {
 	Snapshot     marketdata.Snapshot       `json:"snapshot"`
 	DailyChanges []marketdata.DailyChange  `json:"daily_changes"`
 	Profile      marketdata.CompanyProfile `json:"profile"`
+	Warning      string                    `json:"warning,omitempty"`
 }
 
 func (s *Server) handleMarketCollect(w http.ResponseWriter, r *http.Request) {
@@ -38,9 +39,20 @@ func (s *Server) handleMarketCollect(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshots, err := s.refreshes.Provider.FetchQuotes(r.Context(), []marketdata.QuoteRequest{{Market: market, Symbol: symbol}})
 	if err != nil {
+		allSnapshots := s.listSnapshots(market, symbol)
 		s.saveOperationLog(persistenceOperationLog("", market, symbol, "crawler_quote_collect", "market_provider", "", fmt.Sprintf("抓取实时行情 %s:%s", market, symbol), "行情源返回错误："+err.Error(), map[string]string{
 			"status": "failed",
 		}))
+		if len(allSnapshots) > 0 {
+			latest := allSnapshots[len(allSnapshots)-1]
+			writeJSON(w, http.StatusOK, collectMarketResponse{
+				Snapshot:     latest,
+				DailyChanges: dailyChangesFromSnapshots(allSnapshots),
+				Profile:      marketdata.ProfileFromSnapshots(market, symbol, allSnapshots),
+				Warning:      "行情源暂时不可用，已返回最近一次保存行情。",
+			})
+			return
+		}
 		WriteError(w, http.StatusBadGateway, "provider_error", err.Error(), requestID(r))
 		return
 	}

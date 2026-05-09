@@ -86,6 +86,61 @@ func TestFetchEastmoneyQuote(t *testing.T) {
 	}
 }
 
+func TestFetchTencentQuote(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "sz000821" {
+			t.Fatalf("unexpected query string %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=gbk")
+		_, _ = w.Write([]byte(`v_sz000821="51~ST京机~000821~10.71~10.54~10.43~123812~69434~54378~10.71~98~10.70~2397~10.69~328~10.68~696~10.67~189~10.72~783~10.73~172~10.74~294~10.75~560~10.76~537~~20260508161436~0.17~1.61~10.78~10.42~10.71/123812/131619398";`))
+	}))
+	defer server.Close()
+
+	oldURL := tencentQuoteURL
+	tencentQuoteURL = server.URL + "?q="
+	defer func() { tencentQuoteURL = oldURL }()
+
+	got, err := FetchTencentQuote(context.Background(), QuoteRequest{Market: "CN", Symbol: "000821"}, server.Client())
+	if err != nil {
+		t.Fatalf("fetch tencent quote: %v", err)
+	}
+	if got.Market != "CN" || got.Symbol != "000821" || got.Price != 10.71 || got.PreviousClose != 10.54 || got.Source != "tencent" {
+		t.Fatalf("unexpected snapshot: %#v", got)
+	}
+	if got.Volume != 12381200 || got.ChangePercent != 1.61 || got.High != 10.78 || got.Low != 10.42 {
+		t.Fatalf("unexpected derived values: %#v", got)
+	}
+}
+
+func TestStooqProviderFallsBackToTencentForCN(t *testing.T) {
+	eastmoneyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}))
+	defer eastmoneyServer.Close()
+	tencentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`v_sz000821="51~ST京机~000821~10.71~10.54~10.43~123812~0~0~10.71~0~10.70~0~10.69~0~10.68~0~10.67~0~10.72~0~10.73~0~10.74~0~10.75~0~10.76~0~~20260508161436~0.17~1.61~10.78~10.42~10.71/123812/131619398";`))
+	}))
+	defer tencentServer.Close()
+
+	oldEastmoneyURL := eastmoneyQuoteURL
+	oldTencentURL := tencentQuoteURL
+	eastmoneyQuoteURL = eastmoneyServer.URL
+	tencentQuoteURL = tencentServer.URL + "?q="
+	defer func() {
+		eastmoneyQuoteURL = oldEastmoneyURL
+		tencentQuoteURL = oldTencentURL
+	}()
+
+	provider := NewStooqProvider("")
+	got, err := provider.FetchQuote(context.Background(), QuoteRequest{Market: "CN", Symbol: "000821"})
+	if err != nil {
+		t.Fatalf("fetch fallback quote: %v", err)
+	}
+	if got.Price != 10.71 || got.Source != "tencent" {
+		t.Fatalf("expected tencent fallback snapshot, got %#v", got)
+	}
+}
+
 func TestSnapshotRepositoryDailyChanges(t *testing.T) {
 	repo := NewSnapshotRepository()
 	if err := repo.SaveAll([]Snapshot{
