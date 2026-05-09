@@ -3,18 +3,19 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from .config import Config
+from .skills.stock_research import StockResearchSkill
 
 
 TASK_MODELS = {
-    "market_context_collect": "flash_model",
-    "company_product_collect": "flash_model",
-    "summarize": "chat_model",
-    "risk_review": "pro_model",
+    "stock_info_collect": "flash_model",
+    "trade_market_collect": "flash_model",
+    "information_summarize": "chat_model",
+    "investment_analysis": "pro_model",
     "rag_vector_write": "chat_model",
 }
 
 # 当前 LangGraph 工作流包含 5 个节点，也对应 5 个智能体：
-# 行情上下文采集、公司产品采集、归纳整理、风险审查、RAG/向量写入。
+# 股票信息抓取 Skill、交易行情/K线采集、信息汇总、分析审查、RAG/向量写入。
 # 不同节点按业务风险路由到不同 DeepSeek 模型。
 
 
@@ -28,8 +29,13 @@ class ResearchState:
     interval: str = "2h"
     profile: Dict[str, Any] = field(default_factory=dict)
     latest_snapshot: Dict[str, Any] = field(default_factory=dict)
+    snapshots: List[Dict[str, Any]] = field(default_factory=list)
     snapshots_count: int = 0
     steps: List[Dict[str, Any]] = field(default_factory=list)
+    public_research: Dict[str, Any] = field(default_factory=dict)
+    trading_context: Dict[str, Any] = field(default_factory=dict)
+    summary: str = ""
+    analysis: str = ""
     content: str = ""
     rag_metadata: Dict[str, str] = field(default_factory=dict)
     engine: str = ""
@@ -50,6 +56,7 @@ def run_research_workflow(payload: Dict[str, Any], cfg: Config) -> Dict[str, Any
         interval=str(payload.get("interval", "2h")),
         profile=dict(payload.get("profile") or {}),
         latest_snapshot=dict(payload.get("latest_snapshot") or {}),
+        snapshots=list(payload.get("snapshots") or []),
         snapshots_count=int(payload.get("snapshots_count") or 0),
     )
     final_state, engine = _run_langgraph(state, cfg)
@@ -72,16 +79,16 @@ def _run_langgraph(initial: ResearchState, cfg: Config) -> Tuple[ResearchState, 
 
         # 运行时如果已安装 langgraph，就构建真实节点图；否则走同一批节点函数的顺序兜底。
         graph = StateGraph(ResearchState)
-        graph.add_node("market_context_collect", lambda state: market_context_collect(state, cfg))
-        graph.add_node("company_product_collect", lambda state: company_product_collect(state, cfg))
-        graph.add_node("summarize", lambda state: summarize(state, cfg))
-        graph.add_node("risk_review", lambda state: risk_review(state, cfg))
+        graph.add_node("stock_info_collect", lambda state: stock_info_collect(state, cfg))
+        graph.add_node("trade_market_collect", lambda state: trade_market_collect(state, cfg))
+        graph.add_node("information_summarize", lambda state: information_summarize(state, cfg))
+        graph.add_node("investment_analysis", lambda state: investment_analysis(state, cfg))
         graph.add_node("rag_vector_write", lambda state: rag_vector_write(state, cfg))
-        graph.set_entry_point("market_context_collect")
-        graph.add_edge("market_context_collect", "company_product_collect")
-        graph.add_edge("company_product_collect", "summarize")
-        graph.add_edge("summarize", "risk_review")
-        graph.add_edge("risk_review", "rag_vector_write")
+        graph.set_entry_point("stock_info_collect")
+        graph.add_edge("stock_info_collect", "trade_market_collect")
+        graph.add_edge("trade_market_collect", "information_summarize")
+        graph.add_edge("information_summarize", "investment_analysis")
+        graph.add_edge("investment_analysis", "rag_vector_write")
         graph.add_edge("rag_vector_write", END)
         compiled = graph.compile()
         result = compiled.invoke(initial)
@@ -93,43 +100,67 @@ def _run_langgraph(initial: ResearchState, cfg: Config) -> Tuple[ResearchState, 
 
 
 def _run_sequential(state: ResearchState, cfg: Config) -> ResearchState:
-    for node in (market_context_collect, company_product_collect, summarize, risk_review, rag_vector_write):
+    for node in (stock_info_collect, trade_market_collect, information_summarize, investment_analysis, rag_vector_write):
         state = node(state, cfg)
     return state
 
 
-def market_context_collect(state: ResearchState, cfg: Config) -> ResearchState:
+def stock_info_collect(state: ResearchState, cfg: Config) -> ResearchState:
+    result = StockResearchSkill(cfg).collect_public_info(state.market, state.symbol, state.profile)
+    state.public_research = result.to_dict()
+    item_count = len(state.public_research.get("items") or [])
+    warning_text = "；".join(state.public_research.get("warnings") or [])
+    output = f"通过 {result.mcp_server} Skill 准备 {item_count} 条股票公司/产品公开信息。{warning_text}".strip()
+    _append_step(state, "stock_info_collect", "股票信息抓取 Skill Agent", output, cfg)
+    return state
+
+
+def trade_market_collect(state: ResearchState, cfg: Config) -> ResearchState:
     latest = state.latest_snapshot
-    price = latest.get("price") or latest.get("Price") or 0
-    change = latest.get("change_percent") or latest.get("ChangePercent") or 0
-    output = f"{state.market}:{state.symbol} 行情样本 {state.snapshots_count} 条，最新价 {price}，涨跌幅 {change}%。"
-    _append_step(state, "market_context_collect", "行情上下文采集 Agent", output, cfg)
+    price = _number(latest.get("price") or latest.get("Price"))
+    change = _number(latest.get("change_percent") or latest.get("ChangePercent"))
+    source = latest.get("source") or latest.get("Source") or "unknown"
+    kline = _kline_summary(state.snapshots)
+    state.trading_context = {
+        "latest_price": price,
+        "change_percent": change,
+        "source": source,
+        "snapshots_count": state.snapshots_count or len(state.snapshots),
+        "kline_summary": kline,
+    }
+    output = f"{state.market}:{state.symbol} 最新价 {price}，涨跌幅 {change}%，行情源 {source}，K线摘要：{kline}。"
+    _append_step(state, "trade_market_collect", "交易行情/K线 Agent", output, cfg)
     return state
 
 
-def company_product_collect(state: ResearchState, cfg: Config) -> ResearchState:
+def information_summarize(state: ResearchState, cfg: Config) -> ResearchState:
     profile = state.profile
-    products = profile.get("products") or profile.get("Products") or []
-    business = profile.get("business") or profile.get("Business") or "暂无公开业务文本"
-    if isinstance(products, list) and products:
-        business = f"{business}；产品/业务：{'、'.join(str(item) for item in products)}"
-    _append_step(state, "company_product_collect", "股票产品信息采集 Agent", business, cfg)
+    analysis = profile.get("analysis") or profile.get("Analysis") or "暂无公司产品归纳"
+    public_items = state.public_research.get("items") or []
+    public_text = "；".join(str(item.get("summary", "")) for item in public_items[:3] if isinstance(item, dict))
+    state.summary = (
+        f"关注等级 {state.attention_level}，建议信息采集周期 {state.interval}。"
+        f"公司/产品信息：{public_text or analysis}。"
+        f"交易行情：{state.trading_context.get('kline_summary', '暂无K线摘要')}。"
+    )
+    _append_step(state, "information_summarize", "信息汇总 Agent", state.summary, cfg)
     return state
 
 
-def summarize(state: ResearchState, cfg: Config) -> ResearchState:
-    profile = state.profile
-    analysis = profile.get("analysis") or profile.get("Analysis") or "暂无公司产品归纳。"
-    output = f"关注等级 {state.attention_level}，建议采集周期 {state.interval}。综合归纳：{analysis}"
-    state.content = f"{state.market}:{state.symbol} 研究总结：{output}"
-    _append_step(state, "summarize", "归纳整理 Agent", output, cfg)
-    return state
-
-
-def risk_review(state: ResearchState, cfg: Config) -> ResearchState:
-    output = "风险审查：该结论只用于研究和提醒，不能替代公告、财报、仓位和个人风险承受能力判断，不构成买卖指令。"
-    state.content = f"{state.content}\n{output}"
-    _append_step(state, "risk_review", "风险审查 Agent", output, cfg)
+def investment_analysis(state: ResearchState, cfg: Config) -> ResearchState:
+    change = _number(state.trading_context.get("change_percent"))
+    if change >= 5:
+        risk = "价格波动显著偏强，需核对公告、成交量和是否存在短线过热。"
+    elif change <= -5:
+        risk = "价格波动显著偏弱，需核对基本面变化、止损线和仓位承受能力。"
+    else:
+        risk = "价格波动未触发极端阈值，重点观察趋势延续、成交量和产品信息变化。"
+    state.analysis = (
+        f"分析结论：{risk}"
+        "该结论只用于研究、提醒和风险提示，不构成自动买卖或确定性交易指令。"
+    )
+    state.content = f"{state.market}:{state.symbol} 多智能体研究结果\n{state.summary}\n{state.analysis}"
+    _append_step(state, "investment_analysis", "分析 Agent", state.analysis, cfg)
     return state
 
 
@@ -138,15 +169,18 @@ def rag_vector_write(state: ResearchState, cfg: Config) -> ResearchState:
         "attention_level": state.attention_level,
         "refresh_interval": state.interval,
         "workflow_job_id": state.job_id,
-        "agents": "market_context_collect,company_product_collect,summarize,risk_review,rag_vector_write",
+        "agents": "stock_info_collect,trade_market_collect,information_summarize,investment_analysis,rag_vector_write",
         "agent_engine": state.engine or "pending",
-        "model_market_context_collect": model_for_task(cfg, "market_context_collect"),
-        "model_company_product_collect": model_for_task(cfg, "company_product_collect"),
-        "model_summarize": model_for_task(cfg, "summarize"),
-        "model_risk_review": model_for_task(cfg, "risk_review"),
+        "model_stock_info_collect": model_for_task(cfg, "stock_info_collect"),
+        "model_trade_market_collect": model_for_task(cfg, "trade_market_collect"),
+        "model_information_summarize": model_for_task(cfg, "information_summarize"),
+        "model_investment_analysis": model_for_task(cfg, "investment_analysis"),
+        "stock_research_mcp": cfg.mcp.stock_research.name,
+        "stock_research_mcp_repository": cfg.mcp.stock_research.repository,
         "embedding_status": "indexed",
+        "rag_schema": "stock_intelligence_v2",
     }
-    _append_step(state, "rag_vector_write", "RAG/向量写入 Agent", "生成 RAG 写入载荷和本地向量元数据。", cfg)
+    _append_step(state, "rag_vector_write", "RAG/向量写入 Agent", "生成 stock_intelligence_v2 RAG 写入载荷和本地向量元数据。", cfg)
     return state
 
 
@@ -188,10 +222,36 @@ def _state_from_dict(value: Dict[str, Any]) -> ResearchState:
         interval=str(value.get("interval", "2h")),
         profile=dict(value.get("profile") or {}),
         latest_snapshot=dict(value.get("latest_snapshot") or {}),
+        snapshots=list(value.get("snapshots") or []),
         snapshots_count=int(value.get("snapshots_count") or 0),
     )
     state.steps = list(value.get("steps") or [])
+    state.public_research = dict(value.get("public_research") or {})
+    state.trading_context = dict(value.get("trading_context") or {})
+    state.summary = str(value.get("summary") or "")
+    state.analysis = str(value.get("analysis") or "")
     state.content = str(value.get("content") or "")
     state.rag_metadata = dict(value.get("rag_metadata") or {})
     state.engine = str(value.get("engine") or "")
     return state
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _kline_summary(snapshots: List[Dict[str, Any]]) -> str:
+    if not snapshots:
+        return "暂无历史K线样本"
+    prices = [_number(item.get("price") or item.get("Price")) for item in snapshots if _number(item.get("price") or item.get("Price")) > 0]
+    if not prices:
+        return f"共 {len(snapshots)} 条样本，但缺少有效价格"
+    high = max(prices)
+    low = min(prices)
+    latest = prices[-1]
+    first = prices[0]
+    direction = "上涨" if latest >= first else "下跌"
+    return f"共 {len(prices)} 条有效样本，区间高点 {high:.2f}，低点 {low:.2f}，最新较首条{direction}"

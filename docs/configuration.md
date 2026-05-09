@@ -120,3 +120,23 @@ export JIJIN_AGENT_CONFIG=agent/config/agent.local.json
 
 - `AGENT_HOST`
 - `AGENT_PORT`
+
+Stock information MCP is configured in `agent/config/agent.local.json` under `mcp.stock_research`. The current open-source candidate is `yfinance-mcp-server`:
+
+```json
+{
+  "mcp": {
+    "stock_research": {
+      "enabled": false,
+      "provider": "yfinance",
+      "name": "yfinance-mcp-server",
+      "repository": "https://github.com/barvhaim/yfinance-mcp-server",
+      "command": "uvx",
+      "args": ["yfinance-mcp-server"],
+      "tools": ["get_stock_info", "get_news", "get_history"]
+    }
+  }
+}
+```
+
+Keep `enabled=false` until the MCP server is installed and tested. When disabled or unavailable, the stock information Skill falls back to backend profile and saved market context.

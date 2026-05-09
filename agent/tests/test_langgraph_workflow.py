@@ -29,16 +29,18 @@ class LangGraphWorkflowTest(unittest.TestCase):
         )
 
         self.assertIn(result["engine"], ["langgraph", "fallback-sequential"])
-        self.assertEqual(result["metadata"]["model_market_context_collect"], "deepseek-v4-flash")
-        self.assertEqual(result["metadata"]["model_summarize"], "deepseek-chat")
-        self.assertEqual(result["metadata"]["model_risk_review"], "deepseek-v4-pro")
+        self.assertEqual(result["metadata"]["model_stock_info_collect"], "deepseek-v4-flash")
+        self.assertEqual(result["metadata"]["model_information_summarize"], "deepseek-chat")
+        self.assertEqual(result["metadata"]["model_investment_analysis"], "deepseek-v4-pro")
+        self.assertEqual(result["metadata"]["rag_schema"], "stock_intelligence_v2")
         self.assertEqual(len(result["steps"]), 5)
         self.assertIn("000821", result["content"])
+        self.assertEqual(result["steps"][0]["step_name"], "stock_info_collect")
 
     def test_model_for_task_defaults_to_chat_model(self):
         cfg = Config(llm=LLMConfig(chat_model="chat", flash_model="flash", pro_model="pro"))
-        self.assertEqual(model_for_task(cfg, "market_context_collect"), "flash")
-        self.assertEqual(model_for_task(cfg, "risk_review"), "pro")
+        self.assertEqual(model_for_task(cfg, "stock_info_collect"), "flash")
+        self.assertEqual(model_for_task(cfg, "investment_analysis"), "pro")
         self.assertEqual(model_for_task(cfg, "unknown"), "chat")
 
 

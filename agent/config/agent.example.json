@@ -8,5 +8,16 @@
     "flash_model": "deepseek-v4-flash",
     "pro_model": "deepseek-v4-pro",
     "api_key_env": "DEEPSEEK_API_KEY"
+  },
+  "mcp": {
+    "stock_research": {
+      "enabled": false,
+      "provider": "yfinance",
+      "name": "yfinance-mcp-server",
+      "repository": "https://github.com/barvhaim/yfinance-mcp-server",
+      "command": "uvx",
+      "args": ["yfinance-mcp-server"],
+      "tools": ["get_stock_info", "get_news", "get_history"]
+    }
   }
 }

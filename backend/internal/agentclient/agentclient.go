@@ -34,15 +34,16 @@ type AnalyzeResult struct {
 }
 
 type WorkflowRequest struct {
-	UserID         string                 `json:"user_id"`
-	JobID          string                 `json:"job_id"`
-	Market         string                 `json:"market"`
-	Symbol         string                 `json:"symbol"`
-	AttentionLevel string                 `json:"attention_level"`
-	Interval       string                 `json:"interval"`
-	Profile        map[string]interface{} `json:"profile"`
-	LatestSnapshot map[string]interface{} `json:"latest_snapshot"`
-	SnapshotsCount int                    `json:"snapshots_count"`
+	UserID         string                   `json:"user_id"`
+	JobID          string                   `json:"job_id"`
+	Market         string                   `json:"market"`
+	Symbol         string                   `json:"symbol"`
+	AttentionLevel string                   `json:"attention_level"`
+	Interval       string                   `json:"interval"`
+	Profile        map[string]interface{}   `json:"profile"`
+	LatestSnapshot map[string]interface{}   `json:"latest_snapshot"`
+	Snapshots      []map[string]interface{} `json:"snapshots"`
+	SnapshotsCount int                      `json:"snapshots_count"`
 }
 
 type WorkflowStep struct {

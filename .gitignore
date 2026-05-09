@@ -17,3 +17,4 @@ coverage/
 # Local env
 .env
 *.local.json
+.runlogs/

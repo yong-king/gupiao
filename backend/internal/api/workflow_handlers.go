@@ -149,13 +149,14 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	profile := marketdata.ProfileFromSnapshots(target.Market, target.Symbol, snapshots)
 	latest := latestSnapshotForWorkflow(snapshots)
 	interval := s.cfg.ProductResearchInterval(target.AttentionLevel)
-	if document, steps, ok := s.runAgentResearchTarget(r, jobID, userID, target, profile, latest, len(snapshots), interval); ok {
+	if document, steps, ok := s.runAgentResearchTarget(r, jobID, userID, target, profile, latest, snapshots, interval); ok {
 		return document, steps
 	}
-	collectorOutput := fmt.Sprintf("%s:%s 行情样本 %d 条，产品 %s。", target.Market, target.Symbol, len(snapshots), strings.Join(profile.Products, "、"))
+	stockInfoOutput := fmt.Sprintf("%s:%s profile 公开信息，业务 %s，产品 %s。", target.Market, target.Symbol, profile.Business, strings.Join(profile.Products, "、"))
+	tradingOutput := fmt.Sprintf("%s:%s 行情样本 %d 条，最新价 %.2f，涨跌幅 %.2f%%，来源 %s。", target.Market, target.Symbol, len(snapshots), latest.Price, latest.ChangePercent, latest.Source)
 	summary := workflowSummary(profile, latest, target.AttentionLevel, interval)
-	review := "风险审查：输出仅用于研究和提醒，不作为买卖指令；需结合公告、财报和个人仓位人工确认。"
-	content := summary + "\n" + review
+	review := "分析结论：输出仅用于研究、提醒和风险提示，不作为买卖指令；需结合公告、财报和个人仓位人工确认。"
+	content := summary + "\n" + tradingOutput + "\n" + review
 	document := persistence.RAGDocument{
 		ID:         "rag-" + shortHash(userID+target.Market+target.Symbol+time.Now().UTC().Format(time.RFC3339Nano)),
 		UserID:     userID,
@@ -168,8 +169,9 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 			"attention_level":  target.AttentionLevel,
 			"refresh_interval": interval.String(),
 			"workflow_job_id":  jobID,
-			"agents":           "collector,summarizer,risk_reviewer,rag_writer",
+			"agents":           "stock_info_collect,trade_market_collect,information_summarize,investment_analysis,rag_vector_write",
 			"embedding_status": "indexed",
+			"rag_schema":       "stock_intelligence_v2",
 		},
 		Embedding: localEmbedding(content),
 		CreatedAt: time.Now().UTC(),
@@ -178,10 +180,10 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 		_ = s.store.SaveRAGDocument(document)
 	}
 	steps := []persistence.WorkflowStep{
-		workflowStep(jobID, target, "market_context_collect", "行情上下文采集 Agent", "获取行情、持仓等级和公司产品上下文", collectorOutput, started),
-		workflowStep(jobID, target, "company_product_collect", "股票产品信息采集 Agent", "读取公开产品/业务资料和已保存 profile", profile.Business, started.Add(time.Millisecond)),
-		workflowStep(jobID, target, "summarize", "归纳整理 Agent", collectorOutput, summary, started.Add(2*time.Millisecond)),
-		workflowStep(jobID, target, "risk_review", "风险审查 Agent", summary, review, started.Add(3*time.Millisecond)),
+		workflowStep(jobID, target, "stock_info_collect", "股票信息抓取 Skill Agent", "读取公开产品/业务资料和已保存 profile", stockInfoOutput, started),
+		workflowStep(jobID, target, "trade_market_collect", "交易行情/K线 Agent", "读取实时行情和历史样本", tradingOutput, started.Add(time.Millisecond)),
+		workflowStep(jobID, target, "information_summarize", "信息汇总 Agent", stockInfoOutput+" "+tradingOutput, summary, started.Add(2*time.Millisecond)),
+		workflowStep(jobID, target, "investment_analysis", "分析 Agent", summary, review, started.Add(3*time.Millisecond)),
 		workflowStep(jobID, target, "rag_vector_write", "RAG/向量写入 Agent", "写入 rag_documents 和 rag_vectors", document.ID, started.Add(4*time.Millisecond)),
 	}
 	if s.store != nil {
@@ -197,7 +199,7 @@ func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string,
 	return document, steps
 }
 
-func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID string, target workflowTarget, profile marketdata.CompanyProfile, latest marketdata.Snapshot, snapshotsCount int, interval time.Duration) (persistence.RAGDocument, []persistence.WorkflowStep, bool) {
+func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID string, target workflowTarget, profile marketdata.CompanyProfile, latest marketdata.Snapshot, snapshots []marketdata.Snapshot, interval time.Duration) (persistence.RAGDocument, []persistence.WorkflowStep, bool) {
 	if strings.TrimSpace(s.cfg.AgentURL) == "" {
 		return persistence.RAGDocument{}, nil, false
 	}
@@ -212,7 +214,8 @@ func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID st
 		Interval:       interval.String(),
 		Profile:        mapFromJSON(profile),
 		LatestSnapshot: mapFromJSON(latest),
-		SnapshotsCount: snapshotsCount,
+		Snapshots:      snapshotMaps(snapshots),
+		SnapshotsCount: len(snapshots),
 	})
 	if err != nil {
 		return persistence.RAGDocument{}, nil, false
@@ -281,6 +284,14 @@ func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID st
 		}
 	}
 	return document, steps, true
+}
+
+func snapshotMaps(snapshots []marketdata.Snapshot) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		out = append(out, mapFromJSON(snapshot))
+	}
+	return out
 }
 
 func workflowStep(jobID string, target workflowTarget, name string, agentName string, input string, output string, at time.Time) persistence.WorkflowStep {
