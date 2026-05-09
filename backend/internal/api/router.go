@@ -132,6 +132,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/market/collect", s.requireAuth(s.handleMarketCollect))
 	mux.HandleFunc("/api/market/snapshots", s.requireAuth(s.handleMarketSnapshots))
 	mux.HandleFunc("/api/market/daily-changes", s.requireAuth(s.handleDailyChanges))
+	mux.HandleFunc("/api/market/klines", s.requireAuth(s.handleMarketKLines))
 	mux.HandleFunc("/api/stocks/profile", s.requireAuth(s.handleStockProfile))
 	mux.HandleFunc("/api/alert-rules", s.requireAuth(s.handleAlertRules))
 	mux.HandleFunc("/api/alerts", s.requireAuth(s.handleAlerts))

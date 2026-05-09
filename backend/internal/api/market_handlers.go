@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"jijin/backend/internal/marketdata"
@@ -102,6 +103,34 @@ func (s *Server) handleDailyChanges(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dailyChangesFromSnapshots(s.listSnapshots(market, symbol)))
 }
 
+func (s *Server) handleMarketKLines(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
+		return
+	}
+	market, symbol, ok := marketSymbolQuery(w, r)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 60
+	}
+	var klines []marketdata.KLine
+	var err error
+	if market == "CN" {
+		klines, err = marketdata.FetchTencentDailyKLines(r.Context(), marketdata.QuoteRequest{Market: market, Symbol: symbol}, limit, nil)
+	}
+	if err != nil || len(klines) == 0 {
+		klines = kLinesFromSnapshots(market, symbol, s.listSnapshots(market, symbol))
+	}
+	s.saveOperationLog(persistenceOperationLog("", market, symbol, "crawler_quote_collect", "market_kline_provider", "", fmt.Sprintf("抓取K线 %s:%s", market, symbol), fmt.Sprintf("返回 %d 条K线，来源 %s", len(klines), kLineSource(klines)), map[string]string{
+		"source": "tencent-kline",
+		"limit":  strconv.Itoa(limit),
+	}))
+	writeJSON(w, http.StatusOK, klines)
+}
+
 func (s *Server) handleStockProfile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, "validation_error", "Method not allowed.", requestID(r))
@@ -131,6 +160,33 @@ func dailyChangesFromSnapshots(snapshots []marketdata.Snapshot) []marketdata.Dai
 		return nil
 	}
 	return repo.DailyChanges(snapshots[0].Market, snapshots[0].Symbol)
+}
+
+func kLinesFromSnapshots(market string, symbol string, snapshots []marketdata.Snapshot) []marketdata.KLine {
+	out := make([]marketdata.KLine, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		date := snapshot.DataTime.Format("2006-01-02")
+		out = append(out, marketdata.KLine{
+			Market:   market,
+			Symbol:   symbol,
+			Date:     date,
+			Open:     snapshot.Open,
+			Close:    snapshot.Price,
+			High:     snapshot.High,
+			Low:      snapshot.Low,
+			Volume:   snapshot.Volume,
+			Source:   snapshot.Source,
+			DataTime: snapshot.DataTime,
+		})
+	}
+	return out
+}
+
+func kLineSource(klines []marketdata.KLine) string {
+	if len(klines) == 0 {
+		return "none"
+	}
+	return klines[len(klines)-1].Source
 }
 
 func marketSymbolQuery(w http.ResponseWriter, r *http.Request) (string, string, bool) {

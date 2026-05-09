@@ -141,6 +141,29 @@ func TestStooqProviderFallsBackToTencentForCN(t *testing.T) {
 	}
 }
 
+func TestFetchTencentDailyKLines(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("param"); got != "sz000821,day,,,2,qfq" {
+			t.Fatalf("unexpected param %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{"sz000821":{"qfqday":[["2026-05-07","10.31","10.54","10.67","10.31","138362.000"],["2026-05-08","10.43","10.71","10.78","10.42","123812.000"]]}}}`))
+	}))
+	defer server.Close()
+
+	oldURL := tencentKLineURL
+	tencentKLineURL = server.URL
+	defer func() { tencentKLineURL = oldURL }()
+
+	got, err := FetchTencentDailyKLines(context.Background(), QuoteRequest{Market: "CN", Symbol: "000821"}, 2, server.Client())
+	if err != nil {
+		t.Fatalf("fetch tencent daily kline: %v", err)
+	}
+	if len(got) != 2 || got[1].Close != 10.71 || got[1].High != 10.78 || got[1].Volume != 12381200 {
+		t.Fatalf("unexpected klines: %#v", got)
+	}
+}
+
 func TestSnapshotRepositoryDailyChanges(t *testing.T) {
 	repo := NewSnapshotRepository()
 	if err := repo.SaveAll([]Snapshot{

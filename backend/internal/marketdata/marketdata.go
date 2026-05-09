@@ -146,6 +146,19 @@ type DailyChange struct {
 	RAGText       string
 }
 
+type KLine struct {
+	Market   string
+	Symbol   string
+	Date     string
+	Open     float64
+	Close    float64
+	High     float64
+	Low      float64
+	Volume   int64
+	Source   string
+	DataTime time.Time
+}
+
 func (r *SnapshotRepository) DailyChanges(market string, symbol string) []DailyChange {
 	snapshots := r.ListBySymbol(market, symbol)
 	byDate := make(map[string]Snapshot)

@@ -92,6 +92,31 @@ func TestMarketCollectFallsBackToSavedSnapshot(t *testing.T) {
 	}
 }
 
+func TestMarketKLinesFallsBackToSnapshots(t *testing.T) {
+	snapshots := marketdata.NewSnapshotRepository()
+	if err := snapshots.SaveAll([]marketdata.Snapshot{{
+		Market: "US", Symbol: "AAPL", Open: 100, High: 106, Low: 99, Price: 105, Volume: 10, Source: "saved", DataTime: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+	service := refresh.NewService(marketdata.NewMockProvider(), snapshots, refresh.NewJobRepository())
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdings.NewRepository(), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/market/klines?market=US&symbol=AAPL", nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var payload []marketdata.KLine
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode klines: %v", err)
+	}
+	if len(payload) != 1 || payload[0].Close != 105 || payload[0].High != 106 {
+		t.Fatalf("unexpected klines: %#v", payload)
+	}
+}
+
 func TestResearchCollectAPI(t *testing.T) {
 	snapshots := marketdata.NewSnapshotRepository()
 	if err := snapshots.SaveAll([]marketdata.Snapshot{{

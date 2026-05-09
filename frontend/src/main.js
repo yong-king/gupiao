@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=27";
-import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=27";
-import { formatDailyChange, monitorText, renderChangeCalendar, renderPriceChart, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=27";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=28";
+import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=28";
+import { formatDailyChange, monitorText, renderCandlestickChart, renderChangeCalendar, renderPriceChart, renderRealtimeQuote, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=28";
 
 const root = document.querySelector("#app");
 const STOCK_DETAIL_COOLDOWN_MS = 5 * 60 * 1000;
@@ -29,6 +29,7 @@ const state = {
   collected: null,
   snapshots: [],
   dailyChanges: [],
+  kLines: [],
   profile: null,
   dependencies: null,
   accountConfigs: [],
@@ -475,7 +476,15 @@ function renderStockDetailView(view) {
         ${state.workflowResult ? `<p class="research-summary">${valueOf(state.workflowResult, "job")?.summary || valueOf(state.workflowResult, "Job")?.Summary || "工作流已执行。"}</p>` : ""}
       </article>
       <article>
-        <h3>详细曲线</h3>
+        <h3>实时行情</h3>
+        ${renderRealtimeQuote(latestSnapshot)}
+      </article>
+      <article>
+        <h3>K线</h3>
+        ${renderCandlestickChart(state.kLines)}
+      </article>
+      <article>
+        <h3>快照曲线</h3>
         ${renderPriceChart(state.snapshots)}
       </article>
       <article>
@@ -1348,6 +1357,7 @@ async function collectStockInfoData(market, symbol, options = {}) {
   state.quoteFetchedAt[key] = Date.now();
   state.snapshots = asArray(await getJSON(`/api/market/snapshots?market=${encodeURIComponent(normalizedMarket)}&symbol=${encodeURIComponent(normalizedSymbol)}`, state.token));
   state.dailyChanges = asArray(data.daily_changes || data.DailyChanges);
+  state.kLines = asArray(await getJSON(`/api/market/klines?market=${encodeURIComponent(normalizedMarket)}&symbol=${encodeURIComponent(normalizedSymbol)}&limit=60`, state.token).catch(() => []));
   state.profile = data.profile || data.Profile || null;
   state.profileByKey[key] = state.profile;
   return { cached: false, warning: data.warning || data.Warning || "" };
@@ -1368,6 +1378,7 @@ async function loadMarketAnalysisData() {
   const symbol = encodeURIComponent(state.selectedSymbol);
   state.snapshots = asArray(await getJSON(`/api/market/snapshots?market=${market}&symbol=${symbol}`, state.token));
   state.dailyChanges = asArray(await getJSON(`/api/market/daily-changes?market=${market}&symbol=${symbol}`, state.token));
+  state.kLines = asArray(await getJSON(`/api/market/klines?market=${market}&symbol=${symbol}&limit=60`, state.token).catch(() => []));
   state.profile = await getJSON(`/api/stocks/profile?market=${market}&symbol=${symbol}`, state.token);
   state.profileByKey[stockKey(state.selectedMarket, state.selectedSymbol)] = state.profile;
 }
