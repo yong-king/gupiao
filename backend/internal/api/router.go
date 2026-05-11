@@ -12,6 +12,7 @@ import (
 	"jijin/backend/internal/audit"
 	"jijin/backend/internal/auth"
 	"jijin/backend/internal/config"
+	"jijin/backend/internal/delivery"
 	"jijin/backend/internal/health"
 	"jijin/backend/internal/holdings"
 	"jijin/backend/internal/marketdata"
@@ -35,6 +36,9 @@ type Server struct {
 	alertRules   *alerts.RuleRepository
 	alerts       *alerts.EventRepository
 	notifier     *notifications.Center
+	deliveries   *delivery.SettingsRepository
+	deliveryLogs *delivery.LogRepository
+	wecom        delivery.Sender
 	accounts     *accounts.Repository
 	auth         *auth.Service
 	store        *persistence.Store
@@ -71,6 +75,9 @@ func NewServerWithProvider(watchlists *watchlist.Repository, holdings *holdings.
 		alertRules: alerts.NewRuleRepository(),
 		alerts:     alerts.NewEventRepository(),
 		notifier:   notifications.NewCenter(),
+		deliveries: delivery.NewSettingsRepository(),
+		deliveryLogs: delivery.NewLogRepository(),
+		wecom:      delivery.NewWeComSender(),
 		accounts:   accounts.NewRepository(),
 		auth:       auth.NewService(),
 		cfg:        config.Default(),
@@ -109,6 +116,9 @@ func NewServerWithRefresh(watchlists *watchlist.Repository, holdings *holdings.R
 		alertRules: alerts.NewRuleRepository(),
 		alerts:     alerts.NewEventRepository(),
 		notifier:   notifications.NewCenter(),
+		deliveries: delivery.NewSettingsRepository(),
+		deliveryLogs: delivery.NewLogRepository(),
+		wecom:      delivery.NewWeComSender(),
 		accounts:   accounts.NewRepository(),
 		auth:       auth.NewService(),
 		cfg:        config.Default(),
@@ -122,6 +132,8 @@ func (s *Server) AuditEntries() []audit.Entry {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", health.Handler())
+	mux.HandleFunc("/swagger", handleSwaggerUI)
+	mux.HandleFunc("/swagger/openapi.json", handleSwaggerOpenAPI)
 	mux.HandleFunc("/api/auth/register", s.handleRegister)
 	mux.HandleFunc("/api/auth/login", s.handleLogin)
 	mux.HandleFunc("/api/watchlists", s.requireAuth(s.handleWatchlists))
@@ -138,6 +150,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/alerts", s.requireAuth(s.handleAlerts))
 	mux.HandleFunc("/api/notifications", s.requireAuth(s.handleNotifications))
 	mux.HandleFunc("/api/notifications/read", s.requireAuth(s.handleNotificationRead))
+	mux.HandleFunc("/api/delivery/settings", s.requireAuth(s.handleDeliverySettings))
+	mux.HandleFunc("/api/delivery/test", s.requireAuth(s.handleDeliveryTest))
+	mux.HandleFunc("/api/delivery/logs", s.requireAuth(s.handleDeliveryLogs))
 	mux.HandleFunc("/api/accounts", s.requireAuth(s.handleAccounts))
 	mux.HandleFunc("/api/system/dependencies", s.requireAuth(s.handleSystemDependencies))
 	mux.HandleFunc("/api/research/collect", s.requireAuth(s.handleResearchCollect))

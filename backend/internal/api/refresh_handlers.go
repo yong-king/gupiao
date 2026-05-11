@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -77,11 +78,11 @@ func (s *Server) handleManualRefresh(w http.ResponseWriter, r *http.Request) {
 	if s.store != nil {
 		_ = s.store.SaveSnapshots(job.Snapshots)
 	}
-	s.evaluateAlerts(req.UserID, job.Snapshots)
+	s.evaluateAlerts(r.Context(), req.UserID, job.Snapshots)
 	writeJSON(w, http.StatusOK, job)
 }
 
-func (s *Server) evaluateAlerts(userID string, snapshots []marketdata.Snapshot) {
+func (s *Server) evaluateAlerts(ctx context.Context, userID string, snapshots []marketdata.Snapshot) {
 	rules := s.listAlertRules(userID)
 	for _, snapshot := range snapshots {
 		for _, rule := range rules {
@@ -99,6 +100,7 @@ func (s *Server) evaluateAlerts(userID string, snapshots []marketdata.Snapshot) 
 				_ = s.store.SaveNotification(message)
 			}
 			_ = s.notifier.Publish(message)
+			s.notifyExternalHighAlert(ctx, createdEvent)
 		}
 	}
 }

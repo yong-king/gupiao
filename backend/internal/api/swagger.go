@@ -37,6 +37,9 @@ func swaggerOpenAPISpec() map[string]interface{} {
 			"/api/assistant/chat":         swaggerPath("post", "股票智能助手非流式对话", "AssistantChatRequest", "AssistantChatResponse"),
 			"/api/assistant/chat/stream":  swaggerPath("post", "股票智能助手 SSE 流式对话", "AssistantChatRequest", "AssistantChatStream"),
 			"/api/operation-logs":         swaggerPath("get", "查询 Agent、RAG 和行情采集操作日志", "", "OperationLogList"),
+			"/api/delivery/settings":      swaggerPath("post", "保存提醒投递配置", "DeliverySettingsRequest", "DeliverySettings"),
+			"/api/delivery/test":          swaggerPath("post", "发送提醒投递测试消息", "DeliveryTestRequest", "DeliveryTestResponse"),
+			"/api/delivery/logs":          swaggerPath("get", "查询提醒投递日志", "", "DeliveryLogList"),
 		},
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{
@@ -112,6 +115,53 @@ func swaggerSchemas() map[string]interface{} {
 			"done":  map[string]interface{}{"type": "boolean"},
 		}, nil),
 		"OperationLogList": arraySchema(objectSchema(map[string]interface{}{}, nil)),
+		"DeliverySettingsRequest": objectSchema(map[string]interface{}{
+			"user_id":            stringSchema("用户 ID"),
+			"enabled":            boolSchema("是否启用外部高提醒投递"),
+			"default_channel":    stringSchema("默认投递通道 wecom_webhook/wechat_placeholder"),
+			"wecom_webhook_url":  stringSchema("企业微信机器人 Webhook"),
+			"wecom_mention":      stringSchema("企业微信提醒对象"),
+			"wechat_target":      stringSchema("微信目标占位"),
+			"wechat_note":        stringSchema("微信说明或 MCP 备注"),
+			"min_risk_level":     stringSchema("最小外发风险等级"),
+			"cooldown_seconds":   integerSchema("同类提醒外发冷却秒数"),
+			"mcp_enabled":        boolSchema("是否启用后续 MCP 通道"),
+		}, []string{"user_id"}),
+		"DeliverySettings": objectSchema(map[string]interface{}{
+			"user_id":            stringSchema("用户 ID"),
+			"enabled":            boolSchema("是否启用外部高提醒投递"),
+			"default_channel":    stringSchema("默认投递通道"),
+			"wecom_webhook_url":  stringSchema("企业微信 Webhook，已配置时会脱敏显示"),
+			"wecom_mention":      stringSchema("企业微信提醒对象"),
+			"wechat_target":      stringSchema("微信目标占位"),
+			"wechat_note":        stringSchema("微信说明或 MCP 备注"),
+			"min_risk_level":     stringSchema("最小外发风险等级"),
+			"cooldown_seconds":   integerSchema("同类提醒外发冷却秒数"),
+			"mcp_enabled":        boolSchema("是否启用后续 MCP 通道"),
+			"last_test_status":   stringSchema("最近一次测试状态"),
+			"last_test_message":  stringSchema("最近一次测试结果说明"),
+			"last_tested_at":     stringSchema("最近一次测试时间"),
+		}, []string{"user_id"}),
+		"DeliveryTestRequest": objectSchema(map[string]interface{}{
+			"user_id": stringSchema("用户 ID"),
+		}, []string{"user_id"}),
+		"DeliveryTestResponse": objectSchema(map[string]interface{}{
+			"status":  stringSchema("发送状态"),
+			"message": stringSchema("发送结果说明"),
+		}, nil),
+		"DeliveryLog": objectSchema(map[string]interface{}{
+			"id":               stringSchema("日志 ID"),
+			"user_id":          stringSchema("用户 ID"),
+			"alert_event_id":   stringSchema("关联提醒事件 ID"),
+			"channel_type":     stringSchema("通道类型"),
+			"channel_target":   stringSchema("通道目标摘要"),
+			"request_summary":  stringSchema("请求摘要"),
+			"response_summary": stringSchema("响应摘要"),
+			"status":           stringSchema("sent/failed/skipped"),
+			"error_message":    stringSchema("错误信息"),
+			"created_at":       stringSchema("创建时间"),
+		}, nil),
+		"DeliveryLogList": arraySchema(map[string]interface{}{"$ref": "#/components/schemas/DeliveryLog"}),
 	}
 }
 
@@ -129,6 +179,14 @@ func arraySchema(item interface{}) map[string]interface{} {
 
 func stringSchema(description string) map[string]interface{} {
 	return map[string]interface{}{"type": "string", "description": description}
+}
+
+func boolSchema(description string) map[string]interface{} {
+	return map[string]interface{}{"type": "boolean", "description": description}
+}
+
+func integerSchema(description string) map[string]interface{} {
+	return map[string]interface{}{"type": "integer", "description": description}
 }
 
 func swaggerOpenAPIJSON() ([]byte, error) {

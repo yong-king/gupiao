@@ -32,6 +32,8 @@ const state = {
   kLines: [],
   profile: null,
   dependencies: null,
+  deliverySettings: null,
+  deliveryLogs: [],
   accountConfigs: [],
   operationLogs: [],
   researchResult: null,
@@ -661,6 +663,7 @@ function renderAccountsView() {
 }
 
 function renderSettingsView(view) {
+  const delivery = state.deliverySettings || {};
   return `
     <section class="grid">
       <article>
@@ -677,6 +680,46 @@ function renderSettingsView(view) {
         ${renderDependencies()}
       </article>
       <article>
+        <h3>企业微信/微信提醒投递</h3>
+        <label class="inline-check"><input id="delivery-enabled" type="checkbox" ${delivery.enabled ? "checked" : ""} /> 启用高提醒外部投递</label>
+        <label>默认通道
+          <select id="delivery-channel">
+            <option value="wecom_webhook" ${delivery.default_channel === "wecom_webhook" ? "selected" : ""}>企业微信机器人</option>
+            <option value="wechat_placeholder" ${delivery.default_channel === "wechat_placeholder" ? "selected" : ""}>微信占位配置</option>
+          </select>
+        </label>
+        <label>企业微信 Webhook
+          <input id="delivery-wecom-webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+        </label>
+        <label>企业微信提醒对象
+          <input id="delivery-wecom-mention" value="${escapeHTML(delivery.wecom_mention || "")}" placeholder="例如 所有人 或 某个同事备注" />
+        </label>
+        <label>微信目标说明
+          <input id="delivery-wechat-target" value="${escapeHTML(delivery.wechat_target || "")}" placeholder="例如 预留给后续 MCP/桥接通道" />
+        </label>
+        <label>微信配置备注
+          <input id="delivery-wechat-note" value="${escapeHTML(delivery.wechat_note || "")}" placeholder="这里只做占位，不支持个人微信自动投递" />
+        </label>
+        <div class="two-col">
+          <label>最低外发等级
+            <select id="delivery-min-risk">
+              <option value="high" ${(delivery.min_risk_level || "high") === "high" ? "selected" : ""}>高</option>
+              <option value="critical" ${(delivery.min_risk_level || "high") === "critical" ? "selected" : ""}>严重</option>
+            </select>
+          </label>
+          <label>冷却秒数
+            <input id="delivery-cooldown" type="number" min="0" step="60" value="${Number(delivery.cooldown_seconds || 1800)}" />
+          </label>
+        </div>
+        <label class="inline-check"><input id="delivery-mcp-enabled" type="checkbox" ${delivery.mcp_enabled ? "checked" : ""} /> 预留 MCP 通道执行层</label>
+        <div class="actions">
+          <button id="save-delivery-settings" type="button">保存提醒投递配置</button>
+          <button id="test-delivery-settings" type="button">发送测试消息</button>
+          <button id="load-delivery-logs" type="button">刷新投递记录</button>
+        </div>
+        <p class="muted">第一阶段优先支持企业微信机器人。个人微信这里只保留配置占位，不做不合规自动化接入。</p>
+      </article>
+      <article>
         <h3>主题设置</h3>
         <label>显示主题
           <select id="theme-select">
@@ -691,6 +734,18 @@ function renderSettingsView(view) {
         <p>用户 ID：${state.userID}</p>
         <label>显示名称 <input id="display-name" value="${escapeHTML(state.displayName)}" placeholder="用于页面右上角展示" /></label>
         <button id="save-user-settings" type="button">保存用户信息</button>
+      </article>
+      <article class="wide">
+        <h3>最近外部投递记录</h3>
+        ${state.deliveryLogs.length ? `<table class="stock-table"><thead><tr><th>时间</th><th>通道</th><th>目标</th><th>状态</th><th>请求摘要</th><th>返回</th><th>失败原因</th></tr></thead><tbody>${state.deliveryLogs.map((item) => `<tr>
+          <td>${formatDateTime(valueOf(item, "CreatedAt", "created_at"))}</td>
+          <td>${escapeHTML(valueOf(item, "ChannelType", "channel_type") || "-")}</td>
+          <td>${escapeHTML(valueOf(item, "ChannelTarget", "channel_target") || "-")}</td>
+          <td>${escapeHTML(valueOf(item, "Status", "status") || "-")}</td>
+          <td>${escapeHTML(valueOf(item, "RequestSummary", "request_summary") || "")}</td>
+          <td>${escapeHTML(valueOf(item, "ResponseSummary", "response_summary") || "")}</td>
+          <td>${escapeHTML(valueOf(item, "ErrorMessage", "error_message") || "")}</td>
+        </tr>`).join("")}</tbody></table>` : "<p>暂无外部投递记录。</p>"}
       </article>
     </section>
   `;
@@ -744,6 +799,9 @@ function bindViewActions() {
   document.querySelector("#save-account")?.addEventListener("click", saveAccountConfig);
   document.querySelector("#load-accounts")?.addEventListener("click", () => loadAccounts(true));
   document.querySelector("#load-dependencies")?.addEventListener("click", loadDependencies);
+  document.querySelector("#save-delivery-settings")?.addEventListener("click", saveDeliverySettings);
+  document.querySelector("#test-delivery-settings")?.addEventListener("click", testDeliverySettings);
+  document.querySelector("#load-delivery-logs")?.addEventListener("click", () => loadDeliveryLogs(true));
   document.querySelector("#theme-select")?.addEventListener("change", (event) => {
     state.theme = event.target.value;
     window.localStorage.setItem("jijin_theme", state.theme);
@@ -1498,7 +1556,65 @@ async function loadAccounts(showMessage) {
 async function loadDependencies() {
   try {
     state.dependencies = await getJSON("/api/system/dependencies", state.token);
+    await loadDeliverySettings(false);
+    await loadDeliveryLogs(false);
     state.message = "依赖状态已刷新。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function loadDeliverySettings(showMessage) {
+  try {
+    state.deliverySettings = await getJSON(`/api/delivery/settings?user_id=${encodeURIComponent(state.userID)}`, state.token);
+    if (showMessage) state.message = "提醒投递配置已刷新。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
+async function loadDeliveryLogs(showMessage) {
+  try {
+    state.deliveryLogs = asArray(await getJSON(`/api/delivery/logs?user_id=${encodeURIComponent(state.userID)}`, state.token));
+    if (showMessage) state.message = `已加载 ${state.deliveryLogs.length} 条投递记录。`;
+  } catch (error) {
+    state.message = error.message;
+  }
+  if (showMessage) render();
+}
+
+async function saveDeliverySettings() {
+  try {
+    const current = state.deliverySettings || {};
+    await postJSON("/api/delivery/settings", {
+      user_id: state.userID,
+      enabled: document.querySelector("#delivery-enabled")?.checked === true,
+      default_channel: document.querySelector("#delivery-channel")?.value || "wecom_webhook",
+      // 已配置的 webhook 出于安全原因不回显，只有用户重新输入时才更新。
+      wecom_webhook_url: (document.querySelector("#delivery-wecom-webhook")?.value || "").trim() || (current.wecom_webhook_url === "已配置" ? "" : ""),
+      wecom_mention: (document.querySelector("#delivery-wecom-mention")?.value || "").trim(),
+      wechat_target: (document.querySelector("#delivery-wechat-target")?.value || "").trim(),
+      wechat_note: (document.querySelector("#delivery-wechat-note")?.value || "").trim(),
+      min_risk_level: document.querySelector("#delivery-min-risk")?.value || "high",
+      cooldown_seconds: Number(document.querySelector("#delivery-cooldown")?.value || 1800),
+      mcp_enabled: document.querySelector("#delivery-mcp-enabled")?.checked === true,
+    }, state.token);
+    await loadDeliverySettings(false);
+    state.message = "提醒投递配置已保存。";
+  } catch (error) {
+    state.message = error.message;
+  }
+  render();
+}
+
+async function testDeliverySettings() {
+  try {
+    await postJSON("/api/delivery/test", { user_id: state.userID }, state.token);
+    await loadDeliverySettings(false);
+    await loadDeliveryLogs(false);
+    state.message = "测试消息已发送。";
   } catch (error) {
     state.message = error.message;
   }
@@ -1526,7 +1642,7 @@ function renderStockPicker(prefix, includePrices) {
 
 function renderDependencies() {
   if (!state.dependencies) return "<p class=\"muted\">点击按钮后检查连接状态。</p>";
-  const labels = { database: "数据库", redis: "Redis", llm: "大模型", stock_source: "行情源" };
+  const labels = { database: "数据库", redis: "Redis", llm: "大模型", stock_source: "行情源", delivery: "外部投递" };
   return `<ul class="dependency-list">${Object.keys(labels).map((key) => {
     const item = state.dependencies[key];
     return `<li><span class="${item?.reachable ? "dot ok" : "dot bad"}"></span>${labels[key]}：${item?.reachable ? "可用" : "未就绪"} <span class="muted">${item?.message || ""}</span></li>`;

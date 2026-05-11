@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"jijin/backend/internal/delivery"
 )
 
 type dependencyStatus struct {
@@ -19,6 +22,7 @@ type systemDependenciesResponse struct {
 	Redis       dependencyStatus `json:"redis"`
 	LLM         dependencyStatus `json:"llm"`
 	StockSource dependencyStatus `json:"stock_source"`
+	Delivery    dependencyStatus `json:"delivery"`
 }
 
 func (s *Server) handleSystemDependencies(w http.ResponseWriter, r *http.Request) {
@@ -31,12 +35,39 @@ func (s *Server) handleSystemDependencies(w http.ResponseWriter, r *http.Request
 		src := s.cfg.StockSources[0]
 		stockSource = dependencyStatus{Name: src.Name, Configured: src.Type, Reachable: true, Message: src.BaseURL}
 	}
+	deliveryStatus := dependencyStatus{Name: "delivery", Configured: "disabled", Message: "外部提醒投递未启用"}
+	if settings, ok := s.deliveries.FindByUserID("user-demo"); ok {
+		deliveryStatus = dependencyStatus{
+			Name:       "delivery",
+			Configured: string(settings.DefaultChannel),
+			Reachable:  settings.Enabled && strings.TrimSpace(settings.WeComWebhookURL) != "",
+			Message:    deliveryStatusMessage(settings),
+		}
+	}
 	writeJSON(w, http.StatusOK, systemDependenciesResponse{
 		Database:    tcpStatus("postgres", postgresAddr(s.cfg.DatabaseURL)),
 		Redis:       tcpStatus("redis", s.cfg.RedisAddr),
 		LLM:         dependencyStatus{Name: s.cfg.LLM.Provider, Configured: s.cfg.LLM.Model, Reachable: s.llmKeyConfigured(), Message: "api key env: " + s.cfg.LLM.APIKeyEnv},
 		StockSource: stockSource,
+		Delivery:    deliveryStatus,
 	})
+}
+
+func deliveryStatusMessage(settings delivery.Settings) string {
+	if !settings.Enabled {
+		return "外部提醒投递未启用"
+	}
+	if settings.DefaultChannel == delivery.ChannelTypeWeChat {
+		return "微信通道当前为配置占位，建议优先使用企业微信"
+	}
+	if strings.TrimSpace(settings.WeComWebhookURL) == "" {
+		return "企业微信 Webhook 未配置"
+	}
+	return "企业微信通道已配置"
+}
+
+func contextWithoutCancel(ctx context.Context) context.Context {
+	return context.Background()
 }
 
 func tcpStatus(name string, address string) dependencyStatus {
