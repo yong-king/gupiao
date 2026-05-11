@@ -48,6 +48,7 @@
 25. [24 LangGraph Agent Chat UX](</Users/youngking/Documents/jijin/plans/24-langgraph-agent-chat-ux.plan.md>)
 26. [25 Observability Cadence Report Detail](</Users/youngking/Documents/jijin/plans/25-observability-cadence-report-detail.plan.md>)
 27. [26 Stock Intelligence Multi-Agent](</Users/youngking/Documents/jijin/plans/26-stock-intelligence-multi-agent.plan.md>)
+28. [27 Android Mobile App](</Users/youngking/Documents/jijin/plans/27-android-mobile-app.plan.md>)
 
 ## Global Testing Rule
 
