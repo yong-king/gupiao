@@ -8,6 +8,8 @@ Start local middleware:
 docker compose -f deploy/docker-compose.yml up -d postgres redis
 ```
 
+If you want backend and agent to use DeepSeek locally, put `DEEPSEEK_API_KEY=...` in the repo-root `.env`. The compose file loads that `.env` into the `backend` and `agent` containers.
+
 Apply local database migrations:
 
 ```bash

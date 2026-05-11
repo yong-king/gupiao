@@ -1,6 +1,7 @@
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY go.mod ./
+COPY go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 RUN go build -o /out/jijin-backend ./cmd/server

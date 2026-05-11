@@ -46,6 +46,8 @@
   - 汇总和向量写入：chat。
   - 分析节点：pro。
 - RAG 文档 metadata 必须包含 agent 列表、模型路由、MCP 服务名、MCP 仓库、schema 版本。
+- 如果配置了 `DEEPSEEK_API_KEY`，对话助手、信息汇总 Agent 和分析 Agent 必须真实调用 DeepSeek API；未配置时必须在日志 metadata 中标记 `missing-api-key` 并降级。
+- Docker Compose 本地部署必须显式加载仓库根目录 `.env`，保证 `DEEPSEEK_API_KEY` 能传递到 `backend` 和 `agent` 容器；不允许出现宿主机 `.env` 已填写但容器内环境变量为空的情况。
 
 ### Should Have
 
@@ -215,6 +217,12 @@ Agent 配置文件：`agent/config/agent.example.json`
 }
 ```
 
+本地 Docker 部署要求：
+
+- 仓库根目录 `.env` 用于保存 `DEEPSEEK_API_KEY` 等敏感变量。
+- `deploy/docker-compose.yml` 必须通过 `env_file` 或等效显式方式把 `.env` 注入 `backend` 与 `agent` 容器。
+- 启动后，系统依赖检查或容器内环境检查应能确认 `DEEPSEEK_API_KEY` 非空。
+
 ## 11. Testing Gate
 
 - `cd agent && PYTHONPATH=src python3 -m unittest discover -s tests`
@@ -229,3 +237,4 @@ Agent 配置文件：`agent/config/agent.example.json`
 - MCP 配置能从 agent config 读取。
 - MCP 未启用时，工作流仍通过 profile 和行情样本降级完成。
 - 操作日志能看到每个 Agent 的模型和输出摘要。
+- 当仓库根目录 `.env` 配置了 `DEEPSEEK_API_KEY` 且通过 Docker Compose 启动时，股票助手返回的 `llm_status` 必须为真实模型调用状态，例如 `deepseek-api`，而不是 `missing-api-key` 或 `local-fallback`。

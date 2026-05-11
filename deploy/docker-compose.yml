@@ -18,12 +18,13 @@ services:
   backend:
     build:
       context: ../backend
+    env_file:
+      - ../.env
     environment:
       GO_BACKEND_ADDR: ":8080"
       DATABASE_URL: postgres://jijin:jijin@postgres:5432/jijin?sslmode=disable
       REDIS_ADDR: redis:6379
       AGENT_URL: http://agent:8090
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       REPOSITORY_REMOTE_URL: ${REPOSITORY_REMOTE_URL:-}
       REPOSITORY_BRANCH: ${REPOSITORY_BRANCH:-main}
     ports:
@@ -35,10 +36,11 @@ services:
   agent:
     build:
       context: ../agent
+    env_file:
+      - ../.env
     environment:
       AGENT_HOST: "0.0.0.0"
       AGENT_PORT: "8090"
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     ports:
       - "8090:8090"
 

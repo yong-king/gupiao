@@ -13,6 +13,7 @@ Upgrade the existing research workflow into a complete stock intelligence multi-
 - Rename and restructure LangGraph nodes around the complete stock intelligence flow.
 - Pass historical snapshots from Go backend into Python Agent.
 - Store workflow metadata with schema version and MCP provenance.
+- Ensure Docker Compose injects `.env` secrets into backend and agent containers so DeepSeek calls work in local deployment.
 - Update specs and plan index.
 - Run backend, agent, and frontend tests.
 - Commit and push after tests pass.
@@ -64,6 +65,7 @@ Upgrade the existing research workflow into a complete stock intelligence multi-
 
 - Added `agent/src/agent_core/skills/stock_research.py` as the stock information Skill abstraction.
 - Added MCP config for `yfinance-mcp-server` in `agent/config/agent.example.json`.
+- Fixed local deployment secret injection by loading repo-root `.env` into `backend` and `agent` via `deploy/docker-compose.yml`.
 - Updated LangGraph workflow to the five-node stock intelligence chain:
   - `stock_info_collect`
   - `trade_market_collect`
@@ -72,6 +74,7 @@ Upgrade the existing research workflow into a complete stock intelligence multi-
   - `rag_vector_write`
 - Expanded backend workflow request payload with historical snapshots for K-line context.
 - Added `rag_schema=stock_intelligence_v2` and MCP provenance metadata.
+- Verified after restart that the agent returns `llm_status=deepseek-api` for assistant chat when `DEEPSEEK_API_KEY` is present in `.env`.
 - Tests passed:
   - `cd agent && PYTHONPATH=src python3 -m unittest discover -s tests`
   - `cd backend && env GOCACHE=$PWD/.gocache go test ./...`

@@ -59,14 +59,16 @@ Do not put the actual key in any JSON file. Set it in the shell or server secret
 export DEEPSEEK_API_KEY="..."
 ```
 
+If you use Docker Compose for local startup, keep the key in the repo-root `.env` file and make sure `deploy/docker-compose.yml` loads that file into both `backend` and `agent`. Otherwise the host may have a value while the containers still see an empty key.
+
 Attention-level cadence is configured in backend JSON under `cadence`:
 
-- `cadence.product_research.high`: default `1h`
-- `cadence.product_research.medium`: default `2h`
-- `cadence.product_research.low`: default `4h`
-- `cadence.realtime_quote.high`: default `2m`
-- `cadence.realtime_quote.medium`: default `5m`
-- `cadence.realtime_quote.low`: default `10m`
+- `cadence.product_research.high`: default `1m`
+- `cadence.product_research.medium`: default `2m`
+- `cadence.product_research.low`: default `3m`
+- `cadence.realtime_quote.high`: default `1m`
+- `cadence.realtime_quote.medium`: default `2m`
+- `cadence.realtime_quote.low`: default `3m`
 
 ## Local PostgreSQL And Redis
 
