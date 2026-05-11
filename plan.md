@@ -49,6 +49,7 @@
 26. [25 Observability Cadence Report Detail](</Users/youngking/Documents/jijin/plans/25-observability-cadence-report-detail.plan.md>)
 27. [26 Stock Intelligence Multi-Agent](</Users/youngking/Documents/jijin/plans/26-stock-intelligence-multi-agent.plan.md>)
 28. [27 Android Mobile App](</Users/youngking/Documents/jijin/plans/27-android-mobile-app.plan.md>)
+29. [28 WeCom WeChat High Alert Delivery](</Users/youngking/Documents/jijin/plans/28-wecom-wechat-high-alert-delivery.plan.md>)
 
 ## Global Testing Rule
 
