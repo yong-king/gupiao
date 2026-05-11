@@ -1,51 +1,157 @@
-# 24 LangGraph Agent Chat UX Spec
+# 24 LangGraph Agent 聊天体验与界面优化规范
 
-## Purpose
+## 1. 背景
 
-The project must expose a real, inspectable agent workflow instead of only hard-coded backend summaries. Stock research should be coordinated by a Python LangGraph workflow, routed to configured DeepSeek model tiers by task type, then surfaced through a multi-turn streaming stock assistant and a cleaner financial console UI.
+当前项目已经具备股票助手、多轮对话、LangGraph 工作流和前端控制台，但实际使用体验还有明显问题：
 
-## Requirements
+- 股票助手回答容易把上下文、RAG、公开信息整段复读，像模板拼接，不像真正针对问题在回答。
+- 用户询问“你是什么模型”之类的问题时，回答不直接，缺少模型与调用状态的透明度。
+- 多个页面中的小组件经常横向并排，造成信息碎裂、阅读压力大，不符合高频使用的金融工作台体验。
+- 现有计划文档存在英文内容，不利于后续团队统一维护。
 
-- Python agent service must provide visible LangGraph/LangChain-style workflow code:
-  - market/context collector.
-  - company/product information collector.
-  - summarizer.
-  - risk reviewer.
-  - RAG payload writer.
-- The agent must run even when optional LangGraph packages are not installed, using the same node functions in deterministic sequential fallback mode.
-- Model routing must be explicit and configurable:
-  - lightweight crawling/collection uses `deepseek-v4-flash`.
-  - synthesis/chat uses `deepseek-chat`.
-  - risk review and higher-stakes reasoning uses `deepseek-v4-pro`.
-- Backend research workflow must call the Python agent workflow first and only use the local Go fallback when the agent is unavailable or returns invalid output.
-- Workflow step metadata must show which engine and model were used.
-- Stock assistant must support multi-turn conversation:
-  - per-user session id.
-  - recent conversation history.
-  - holdings, stock-pool, profile, snapshots, and RAG context.
-  - persisted messages.
-- Stock assistant must support streaming output for the frontend chat box.
-- Frontend stock assistant must be a real chat interface with message bubbles, target selector, and streaming answer updates.
-- Stock clicks from holdings, stock pools, and reports must load detail data while respecting a local refresh cooldown to reduce pressure on stock sources.
-- Frontend layout must be cleaned up into a denser, modern finance console:
-  - stable cards/panels and tables.
-  - clearer toolbar spacing.
-  - consistent dark/light theme behavior.
-  - no broken or dead clickable navigation.
+本次优化目标是在不改变“仅做研究提醒、不做自动交易”的前提下，提升股票助手的回答质量、前端布局稳定性，以及文档与接口可维护性。
 
-## Non-Goals
+## 2. 目标
 
-- No automatic trading.
-- No broker write actions.
-- No anti-bot bypass or aggressive scraping.
-- No requirement that DeepSeek API calls be made during tests; deterministic fallback remains required.
+- 股票助手优先直接回答用户问题，而不是复读上下文。
+- 股票助手需要向前端返回并展示模型名、提供方和调用状态。
+- 页面中的小组件默认尽量纵向铺满，减少多个小卡片并排挤压。
+- 将本模块相关 plan 和 spec 统一维护为中文。
+- 为股票助手相关接口补充清晰的 Swagger/OpenAPI 描述。
+- 代码在关键逻辑处增加适当注释，帮助后续维护。
 
-## Acceptance Criteria
+## 3. 非目标
 
-- Python tests can import and run the research workflow and see LangGraph/fallback engine plus model routing metadata.
-- Backend workflow run stores agent-returned step summaries and model metadata when the Python agent service is reachable.
-- Backend assistant saves and loads chat history by session.
-- Streaming assistant endpoint emits incremental chunks and a final payload.
-- Frontend chat appends the user message, streams the assistant answer into the current bubble, and preserves context for the session.
-- Clicking a stock repeatedly within the cooldown uses cached detail data and shows a clear status message.
-- Frontend, backend, and agent test gates pass.
+- 不新增自动买入、自动卖出或自动下单功能。
+- 不引入营销风格首页或花哨装饰性布局。
+- 不把所有接口都重写成完整外部 Swagger 框架；当前阶段允许继续使用仓库内轻量 OpenAPI 生成方式。
+
+## 4. 用户场景
+
+- 用户问“你是什么模型”，助手应直接说明当前模型和运行状态，而不是输出股票分析模板。
+- 用户问“分析当前的股票”，助手应先给结论，再给依据，再补充数据缺口和下一步建议。
+- 用户进入持仓、自选、提醒、详情、设置等页面时，每个模块应主要按纵向堆叠展示，减少一屏多个小块横向抢空间。
+- 前端用户希望能看出当前回答到底是在线大模型返回，还是本地降级结果。
+
+## 5. 功能范围
+
+### 必须实现
+
+- 股票助手回答策略优化：
+  - 优先回答用户问题本身。
+  - 避免把“上下文、历史对话、RAG、公开信息”原样整段复读给用户。
+  - 当信息不足时，明确指出数据缺口。
+  - 最后保留“仅供研究提醒，不构成买卖指令”。
+- 股票助手模型透明度：
+  - 后端响应必须包含 `model`、`provider`、`llm_status`。
+  - 前端助手面板必须展示当前模型、提供方和调用状态。
+- 页面布局优化：
+  - `grid` 默认改为单列纵向主布局。
+  - 需要铺满宽度的模块优先整行显示。
+  - 助手页面改为纵向工作台，不再左右分栏挤压。
+- 计划与规范文档要求：
+  - 本模块 spec 与 plan 使用中文。
+  - 后续新增或修改的 plan 默认使用中文。
+- Swagger 文档：
+  - 股票助手非流式接口与流式接口需要清楚描述请求和响应字段。
+  - `AssistantChatResponse` 中新增字段必须同步写入 OpenAPI。
+- 代码注释：
+  - 在助手兜底逻辑、提示词策略、关键布局逻辑或接口契约处增加简短注释。
+
+### 应该实现
+
+- 前端消息气泡中展示本轮回答的模型元信息。
+- 当返回的是本地降级模式时，前端用明显但克制的状态文案提醒用户。
+- 布局优化尽量不影响现有交互和数据流。
+
+### 范围外
+
+- 不引入完整的第三方 UI 框架重构。
+- 不重做整套前端页面的信息架构。
+- 不强制所有历史计划文件都一次性翻译成中文。
+
+## 6. 交互要求
+
+### 股票助手回答风格
+
+- 用户问模型信息时：
+  - 直接回答当前模型或当前是否处于降级模式。
+  - 不输出股票分析模板。
+- 用户问股票分析时：
+  - 第一段先给结论。
+  - 第二段给主要依据。
+  - 若有数据缺口，单独说明。
+  - 结尾给下一步建议和风险提示。
+
+### 前端布局
+
+- 默认情况下，每个页面中的面板按纵向排列。
+- 表格、图表、日志、大块信息区应整行展示。
+- 小组件不再优先自动排成多列，避免页面碎片化。
+
+## 7. 后端设计
+
+### 助手响应结构
+
+`POST /api/assistant/chat` 和流式最终返回都必须包含：
+
+```json
+{
+  "market": "CN",
+  "symbol": "002555",
+  "session_id": "chat-xxx",
+  "answer": "中文回答",
+  "context_summary": "上下文摘要",
+  "rag_document_ids": ["rag-1"],
+  "model": "deepseek-chat",
+  "provider": "deepseek",
+  "llm_status": "deepseek-api"
+}
+```
+
+### 本地兜底策略
+
+- 本地兜底回答必须先回答用户问题，再说明数据边界。
+- 当用户问题明显是“你是什么模型”时，本地兜底也必须直接说明当前未走在线模型，而不是生成股票分析套话。
+
+## 8. Python Agent 设计
+
+- 助手系统提示词必须要求：
+  - 优先回答用户问题。
+  - 不复读原始上下文字段标签。
+  - 对模型问题直接回答。
+  - 在信息不足时明确提示数据缺口。
+- 助手兜底逻辑要与提示词目标一致。
+
+## 9. 前端设计
+
+- 助手侧边配置区保留股票选择、会话说明和操作按钮。
+- 助手主对话区展示：
+  - 当前股票
+  - 模型调用状态
+  - 提供方
+  - 模型名称
+  - 对话消息
+- 页面网格默认改为单列，避免多个小面板并排。
+
+## 10. 文档与计划要求
+
+- 本模块 spec 与 plan 使用中文。
+- 以后新增 plan 默认使用中文。
+- 与本模块相关的 README、配置文档、部署文档如果涉及此次行为变化，应同步更新。
+
+## 11. 测试门槛
+
+- `cd agent && PYTHONPATH=src python3 -m unittest discover -s tests`
+- `cd backend && env GOCACHE=$PWD/.gocache go test ./...`
+- `cd frontend && npm test`
+- `cd frontend && npm run typecheck`
+
+## 12. 验收标准
+
+- 用户问“你是什么模型”时，助手回答必须直接说明模型或降级状态。
+- 用户问股票分析时，回答不能主要表现为上下文复读。
+- 股票助手响应中包含 `model`、`provider`、`llm_status`，前端能展示这些信息。
+- 多个主页面的小组件布局默认以纵向整行展示为主。
+- Swagger/OpenAPI 中助手响应字段与代码实现一致。
+- 相关 spec 和 plan 文件使用中文。

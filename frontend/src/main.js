@@ -1,6 +1,6 @@
-import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=28";
-import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=28";
-import { formatDailyChange, monitorText, renderCandlestickChart, renderChangeCalendar, renderPriceChart, renderRealtimeQuote, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=28";
+import { formatRefreshStatus, getViewCopy, isKnownView, layoutClassForAuthState, navItems, refreshModes } from "./app.js?v=29";
+import { API_BASE, deleteJSON, getJSON, postJSON, shouldInvalidateSession } from "./api.js?v=29";
+import { formatDailyChange, monitorText, renderCandlestickChart, renderChangeCalendar, renderPriceChart, renderRealtimeQuote, summarizeMarketNumbers, summarizeProfile, valueOf } from "./market.js?v=29";
 
 const root = document.querySelector("#app");
 const STOCK_DETAIL_COOLDOWN_MS = 5 * 60 * 1000;
@@ -39,6 +39,7 @@ const state = {
   workflowResult: null,
   assistantAnswer: null,
   assistantMessages: [],
+  assistantLastMeta: null,
   assistantSessionID,
   assistantStreaming: false,
   quoteFetchedAt: {},
@@ -512,6 +513,7 @@ function renderAssistantView(view) {
   const messages = state.assistantMessages.map((message) => `
     <div class="chat-message ${message.role}">
       <span>${message.role === "user" ? "你" : "AI"}</span>
+      ${message.meta ? `<strong>${escapeHTML(message.meta)}</strong>` : ""}
       <p>${escapeHTML(message.content || "")}</p>
     </div>
   `).join("");
@@ -525,6 +527,7 @@ function renderAssistantView(view) {
       <td>${steps.length}</td>
     </tr>`;
   }).join("");
+  const meta = state.assistantLastMeta;
   return `
     <section class="assistant-layout">
       <article class="assistant-config">
@@ -544,11 +547,20 @@ function renderAssistantView(view) {
           <button id="load-workflows-assistant" type="button">刷新工作流记录</button>
           <button id="clear-assistant-chat" type="button">清空本页对话</button>
         </div>
+        <div class="assistant-meta">
+          <div class="assistant-meta-row">
+            <span class="assistant-chip ${assistantStatusClass(meta?.llm_status)}">${escapeHTML(assistantStatusLabel(meta?.llm_status))}</span>
+            <span class="assistant-chip ${meta?.provider === "deepseek" ? "healthy" : "warn"}">提供方：${escapeHTML(meta?.provider || "未知")}</span>
+          </div>
+          <div class="assistant-meta-row">
+            <span class="assistant-chip">模型：${escapeHTML(meta?.model || "未返回")}</span>
+          </div>
+        </div>
       </article>
       <article class="chat-panel">
         <div class="panel-title">
           <h3>${state.selectedMarket}:${state.selectedSymbol}</h3>
-          <span class="muted">${state.assistantStreaming ? "正在流式输出..." : "DeepSeek 路由分析"}</span>
+          <span class="muted">${state.assistantStreaming ? "正在流式输出..." : assistantPanelHint(meta)}</span>
         </div>
         <div class="chat-window" id="assistant-chat-window">
           ${messages || `<div class="empty-chat">${view.empty}</div>`}
@@ -559,7 +571,7 @@ function renderAssistantView(view) {
         <div class="actions">
           <button id="ask-assistant" type="button" ${state.assistantStreaming ? "disabled" : ""}>发送并分析</button>
         </div>
-        ${state.assistantAnswer ? `<p class="muted">${escapeHTML(valueOf(state.assistantAnswer, "ContextSummary", "context_summary") || "")}</p>` : ""}
+        ${state.assistantAnswer ? `<p class="muted">上下文摘要：${escapeHTML(valueOf(state.assistantAnswer, "ContextSummary", "context_summary") || "")}</p>` : ""}
       </article>
       <article class="wide">
         <h3>最近 AI 工作流</h3>
@@ -656,7 +668,7 @@ function renderSettingsView(view) {
         <p class="code">config/backend.example.json</p>
         <p class="code">agent/config/agent.example.json</p>
         <p class="code">deploy/docker-compose.yml</p>
-        <p class="muted">刷新周期在 backend 配置的 cadence 中维护：产品信息高/中/低为 1h/2h/4h，实时行情为 2m/5m/10m。</p>
+        <p class="muted">刷新周期在 backend 配置的 cadence 中维护：高/中/低为 1m/2m/3m；采集后会进入多智能体汇总、分析和 RAG 写入。</p>
         <p class="muted">${view.empty}</p>
       </article>
       <article>
@@ -724,6 +736,7 @@ function bindViewActions() {
   document.querySelector("#clear-assistant-chat")?.addEventListener("click", () => {
     state.assistantMessages = [];
     state.assistantAnswer = null;
+    state.assistantLastMeta = null;
     render();
   });
   document.querySelector("#load-workflows-assistant")?.addEventListener("click", () => loadWorkflows(true));
@@ -1248,8 +1261,9 @@ async function askAssistant() {
     return;
   }
   state.assistantMessages.push({ role: "user", content: question });
-  state.assistantMessages.push({ role: "assistant", content: "" });
+  state.assistantMessages.push({ role: "assistant", content: "", meta: "" });
   state.assistantStreaming = true;
+  state.assistantLastMeta = null;
   state.message = "股票助手正在流式分析。";
   render();
   try {
@@ -1260,6 +1274,13 @@ async function askAssistant() {
       symbol,
       question,
     });
+    state.assistantLastMeta = {
+      model: valueOf(state.assistantAnswer, "Model", "model") || "",
+      provider: valueOf(state.assistantAnswer, "Provider", "provider") || "",
+      llm_status: valueOf(state.assistantAnswer, "LLMStatus", "llm_status") || "",
+    };
+    const last = state.assistantMessages[state.assistantMessages.length - 1];
+    if (last?.role === "assistant") last.meta = formatAssistantMeta(state.assistantLastMeta);
     state.selectedMarket = valueOf(state.assistantAnswer, "Market", "market") || market;
     state.selectedSymbol = valueOf(state.assistantAnswer, "Symbol", "symbol") || symbol;
     state.message = "股票助手已完成分析。";
@@ -1315,10 +1336,49 @@ async function streamAssistantChat(payload) {
       }
       if (data.done) {
         finalResponse = data.response;
+        const last = state.assistantMessages[state.assistantMessages.length - 1];
+        if (last?.role === "assistant") {
+          last.meta = formatAssistantMeta({
+            model: valueOf(data.response, "Model", "model") || "",
+            provider: valueOf(data.response, "Provider", "provider") || "",
+            llm_status: valueOf(data.response, "LLMStatus", "llm_status") || "",
+          });
+        }
       }
     }
   }
   return finalResponse || { market: payload.market, symbol: payload.symbol, answer: state.assistantMessages.at(-1)?.content || "" };
+}
+
+function assistantStatusLabel(status) {
+  if (status === "deepseek-api") return "已调用大模型";
+  if (status === "missing-api-key") return "缺少密钥";
+  if (status === "api-error") return "模型调用失败";
+  if (status === "local-fallback") return "本地降级模式";
+  if (!status) return "等待分析";
+  return status;
+}
+
+function assistantStatusClass(status) {
+  if (status === "deepseek-api") return "healthy";
+  if (status === "missing-api-key" || status === "api-error" || status === "local-fallback") return "danger";
+  return "warn";
+}
+
+function assistantPanelHint(meta) {
+  if (!meta) return "优先直接回答问题";
+  if (meta.llm_status === "deepseek-api") {
+    return `${meta.provider || "模型"} · ${meta.model || "已路由"}`;
+  }
+  return `${assistantStatusLabel(meta.llm_status)} · ${meta.model || "未返回模型"}`;
+}
+
+function formatAssistantMeta(meta) {
+  const parts = [];
+  if (meta?.provider) parts.push(meta.provider);
+  if (meta?.model) parts.push(meta.model);
+  if (meta?.llm_status) parts.push(assistantStatusLabel(meta.llm_status));
+  return parts.join(" · ");
 }
 
 async function collectStockInfo(market, symbol, options = {}) {

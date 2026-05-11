@@ -50,6 +50,7 @@ func TestAssistantChatUsesHoldingContext(t *testing.T) {
 	}
 	service := refresh.NewService(marketdata.NewMockProvider(), snapshots, refresh.NewJobRepository())
 	server := NewServerWithRefresh(watchlist.NewRepository(), holdingRepo, service)
+	server.cfg.AgentURL = ""
 
 	req := httptest.NewRequest(http.MethodPost, "/api/assistant/chat", strings.NewReader(`{"user_id":"user-1","symbol":"000821","question":"分析风险"}`))
 	rec := httptest.NewRecorder()
@@ -64,6 +65,47 @@ func TestAssistantChatUsesHoldingContext(t *testing.T) {
 	if payload.Market != "CN" || !strings.Contains(payload.ContextSummary, "持仓数量") || !strings.Contains(payload.Answer, "不构成买卖指令") {
 		t.Fatalf("unexpected assistant response: %#v", payload)
 	}
+	if payload.Provider != "local" || payload.LLMStatus != "local-fallback" {
+		t.Fatalf("unexpected model metadata: %#v", payload)
+	}
+}
+
+func TestAssistantChatExplainsMissingData(t *testing.T) {
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdings.NewRepository(), refresh.NewService(marketdata.NewMockProvider(), marketdata.NewSnapshotRepository(), refresh.NewJobRepository()))
+	server.cfg.AgentURL = ""
+
+	req := httptest.NewRequest(http.MethodPost, "/api/assistant/chat", strings.NewReader(`{"user_id":"user-1","market":"CN","symbol":"000821","question":"结合最近行情下一步看什么"}`))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var payload assistantChatResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(payload.Answer, "数据缺口") || !strings.Contains(payload.Answer, "缺少最近行情样本") {
+		t.Fatalf("expected missing-data answer, got %#v", payload)
+	}
+}
+
+func TestAssistantChatAnswersModelQuestionDirectly(t *testing.T) {
+	server := NewServerWithRefresh(watchlist.NewRepository(), holdings.NewRepository(), refresh.NewService(marketdata.NewMockProvider(), marketdata.NewSnapshotRepository(), refresh.NewJobRepository()))
+	server.cfg.AgentURL = ""
+
+	req := httptest.NewRequest(http.MethodPost, "/api/assistant/chat", strings.NewReader(`{"user_id":"user-1","market":"CN","symbol":"002555","question":"你是什么模型"}`))
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var payload assistantChatResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(payload.Answer, "本地降级研究模式") {
+		t.Fatalf("expected direct model answer, got %#v", payload)
+	}
 }
 
 func TestAssistantChatStreamEmitsChunks(t *testing.T) {
@@ -72,6 +114,7 @@ func TestAssistantChatStreamEmitsChunks(t *testing.T) {
 		t.Fatalf("upsert holding: %v", err)
 	}
 	server := NewServerWithRefresh(watchlist.NewRepository(), holdingRepo, refresh.NewService(marketdata.NewMockProvider(), marketdata.NewSnapshotRepository(), refresh.NewJobRepository()))
+	server.cfg.AgentURL = ""
 
 	req := httptest.NewRequest(http.MethodPost, "/api/assistant/chat/stream", strings.NewReader(`{"user_id":"user-1","session_id":"s1","symbol":"000821","question":"分析风险"}`))
 	rec := httptest.NewRecorder()

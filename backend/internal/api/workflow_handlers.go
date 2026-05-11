@@ -137,14 +137,28 @@ func (s *Server) workflowTargets(userID string, attention string, market string,
 func (s *Server) runResearchTarget(r *http.Request, jobID string, userID string, target workflowTarget) (persistence.RAGDocument, []persistence.WorkflowStep) {
 	started := time.Now().UTC()
 	snapshots := s.listSnapshots(target.Market, target.Symbol)
-	if len(snapshots) == 0 {
-		if fetched, err := s.refreshes.Provider.FetchQuotes(r.Context(), []marketdata.QuoteRequest{{Market: target.Market, Symbol: target.Symbol}}); err == nil {
-			_ = s.refreshes.Snapshots.SaveAll(fetched)
-			if s.store != nil {
-				_ = s.store.SaveSnapshots(fetched)
-			}
-			snapshots = s.listSnapshots(target.Market, target.Symbol)
+	if fetched, err := s.refreshes.Provider.FetchQuotes(r.Context(), []marketdata.QuoteRequest{{Market: target.Market, Symbol: target.Symbol}}); err == nil {
+		_ = s.refreshes.Snapshots.SaveAll(fetched)
+		if s.store != nil {
+			_ = s.store.SaveSnapshots(fetched)
 		}
+		s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "trade_market_collect", "交易行情/K线 Agent", "market-provider", "按关注等级工作流刷新实时行情", fmt.Sprintf("采集 %d 条实时行情样本", len(fetched)), map[string]string{
+			"workflow_job_id":    jobID,
+			"attention_level":    target.AttentionLevel,
+			"realtime_interval":  s.cfg.RealtimeQuoteInterval(target.AttentionLevel).String(),
+			"research_interval":  s.cfg.ProductResearchInterval(target.AttentionLevel).String(),
+			"refresh_trigger":    "attention_workflow",
+			"market_data_source": "provider",
+		}))
+		snapshots = s.listSnapshots(target.Market, target.Symbol)
+	} else {
+		s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "trade_market_collect", "交易行情/K线 Agent", "market-provider", "按关注等级工作流刷新实时行情", err.Error(), map[string]string{
+			"workflow_job_id":   jobID,
+			"attention_level":   target.AttentionLevel,
+			"realtime_interval": s.cfg.RealtimeQuoteInterval(target.AttentionLevel).String(),
+			"refresh_trigger":   "attention_workflow",
+			"status":            "failed",
+		}))
 	}
 	profile := marketdata.ProfileFromSnapshots(target.Market, target.Symbol, snapshots)
 	latest := latestSnapshotForWorkflow(snapshots)
@@ -273,7 +287,11 @@ func (s *Server) runAgentResearchTarget(r *http.Request, jobID string, userID st
 			"agent_engine":    result.Engine,
 		}))
 	}
-	s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "rag_vector_write", "RAG/向量写入 Agent", metadata["model_summarize"], "写入 LangGraph 研究结果", content, map[string]string{
+	ragModel := metadata["model_information_summarize"]
+	if strings.TrimSpace(ragModel) == "" {
+		ragModel = metadata["model_summarize"]
+	}
+	s.saveOperationLog(persistenceOperationLog(userID, target.Market, target.Symbol, "rag_vector_write", "RAG/向量写入 Agent", ragModel, "写入 LangGraph 研究结果", content, map[string]string{
 		"workflow_job_id": jobID,
 		"rag_document_id": document.ID,
 		"agent_engine":    result.Engine,
@@ -401,6 +419,8 @@ type assistantChatResponse struct {
 	ContextSummary string   `json:"context_summary"`
 	RAGDocumentIDs []string `json:"rag_document_ids"`
 	Model          string   `json:"model"`
+	Provider       string   `json:"provider"`
+	LLMStatus      string   `json:"llm_status"`
 }
 
 func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +472,7 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 		}
 	}
 	contextSummary := assistantContextSummary(holding, inPool, len(ragDocs), len(snapshots))
+	dataGaps := assistantDataGaps(holding, inPool, len(ragDocs), len(snapshots))
 	webResearch := assistantWebResearch(profile)
 	s.saveOperationLog(persistenceOperationLog(userID, market, symbol, "crawler_public_info_collect", "公开信息采集 Agent", s.cfg.LLM.FlashModel, "读取股票公开产品/业务信息并准备给助手综合分析", webResearch[0]["summary"].(string), map[string]string{
 		"source": "local_profile_public_context",
@@ -462,9 +483,10 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 			history = messages
 		}
 	}
-	answer := fmt.Sprintf("针对 %s:%s：%s。你问的是：%s。结合当前上下文：%s。RAG 参考：%s。结论：继续作为研究对象观察，重点核对产品/业务变化、价格波动和你的持仓成本；这不是买卖指令。",
-		market, symbol, profile.Analysis, strings.TrimSpace(req.Question), contextSummary, ragText)
+	answer := assistantFallbackAnswer(market, symbol, profile, strings.TrimSpace(req.Question), contextSummary, dataGaps, ragText)
 	model := "local-fallback"
+	llmStatus := "local-fallback"
+	provider := "local"
 	if strings.TrimSpace(s.cfg.AgentURL) != "" {
 		client := agentclient.NewClient(strings.TrimRight(s.cfg.AgentURL, "/"))
 		if result, err := client.Chat(r.Context(), agentclient.ChatRequest{
@@ -478,15 +500,23 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 			RAGDocuments:   ragDocumentMaps(ragDocs),
 			Profile:        mapFromJSON(profile),
 			WebResearch:    webResearch,
+			DataGaps:       dataGaps,
 		}); err == nil {
 			answer = result.Answer
 			model = result.Model
+			provider = result.Provider
+			llmStatus = result.LLMStatus
 		}
+	}
+	if model == "local-fallback" {
+		answer = assistantFallbackAnswer(market, symbol, profile, strings.TrimSpace(req.Question), contextSummary, dataGaps, ragText)
 	}
 	s.saveOperationLog(persistenceOperationLog(userID, market, symbol, "ai_assistant_chat", "股票助手 Agent", model, strings.TrimSpace(req.Question), answer, map[string]string{
 		"session_id":       sessionID,
 		"rag_document_ids": strings.Join(ragIDs, ","),
 		"rag_count":        strconv.Itoa(len(ragDocs)),
+		"llm_provider":     provider,
+		"llm_status":       llmStatus,
 	}))
 	if s.store != nil {
 		_ = s.store.SaveAssistantMessage(persistence.AssistantMessage{
@@ -502,7 +532,17 @@ func (s *Server) buildAssistantChatResponse(r *http.Request, req assistantChatRe
 			CreatedAt:      time.Now().UTC(),
 		})
 	}
-	return assistantChatResponse{Market: market, Symbol: symbol, SessionID: sessionID, Answer: answer, ContextSummary: contextSummary, RAGDocumentIDs: ragIDs, Model: model}, nil
+	return assistantChatResponse{
+		Market:         market,
+		Symbol:         symbol,
+		SessionID:      sessionID,
+		Answer:         answer,
+		ContextSummary: contextSummary,
+		RAGDocumentIDs: ragIDs,
+		Model:          model,
+		Provider:       provider,
+		LLMStatus:      llmStatus,
+	}, nil
 }
 
 func (s *Server) handleAssistantChatStream(w http.ResponseWriter, r *http.Request) {
@@ -644,6 +684,53 @@ func assistantContextSummary(holding *holdings.Holding, inPool bool, ragCount in
 	return strings.Join(parts, "；")
 }
 
+func assistantDataGaps(holding *holdings.Holding, inPool bool, ragCount int, snapshotCount int) []string {
+	gaps := []string{}
+	if holding == nil {
+		gaps = append(gaps, "未找到该股票的持仓成本和仓位信息")
+	}
+	if !inPool {
+		gaps = append(gaps, "该股票不在当前股票池中")
+	}
+	if snapshotCount == 0 {
+		gaps = append(gaps, "缺少最近行情样本，请先刷新行情或运行关注等级工作流")
+	}
+	if ragCount == 0 {
+		gaps = append(gaps, "缺少历史 RAG 研究记录，请先运行多智能体研究工作流")
+	}
+	return gaps
+}
+
+func assistantFallbackAnswer(market string, symbol string, profile marketdata.CompanyProfile, question string, contextSummary string, dataGaps []string, ragText string) string {
+	// 本地兜底回答必须先回答用户问题，再补充数据边界，避免单纯复读上下文。
+	loweredQuestion := strings.ToLower(strings.TrimSpace(question))
+	if strings.Contains(loweredQuestion, "什么模型") || strings.Contains(loweredQuestion, "哪个模型") || strings.Contains(loweredQuestion, "llm") || strings.Contains(loweredQuestion, "模型") {
+		return "当前这次回答没有成功走到在线大模型，而是使用了本地降级研究模式，所以你看到的会更像规则化总结。仅供研究提醒，不构成买卖指令。"
+	}
+	gapText := "暂无明显缺口"
+	if len(dataGaps) > 0 {
+		gapText = strings.Join(dataGaps, "；")
+	}
+	analysis := strings.TrimRight(strings.TrimSpace(profile.Analysis), "。.!！")
+	if analysis == "" {
+		analysis = "公司和产品资料暂时不完整"
+	}
+	ragHint := ""
+	if strings.TrimSpace(ragText) != "" && strings.TrimSpace(ragText) != "暂无 RAG 历史总结" {
+		ragHint = " 历史研究参考：" + ragText
+	}
+	return fmt.Sprintf(
+		"先给结论：%s:%s 当前更适合继续研究观察，不建议只凭现有信息下确定性判断。你的问题是：%s。主要依据：%s。当前持仓与关注上下文：%s。数据缺口：%s。%s 下一步建议先补齐最新行情、公告、业务变化和历史研究，再结合你的持仓成本判断风险收益是否匹配。仅供研究提醒，不构成买卖指令。",
+		market,
+		symbol,
+		question,
+		analysis,
+		contextSummary,
+		gapText,
+		ragHint,
+	)
+}
+
 func assistantHistoryMaps(messages []persistence.AssistantMessage) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(messages))
 	for _, message := range messages {
@@ -669,8 +756,9 @@ func ragDocumentMaps(documents []persistence.RAGDocument) []map[string]interface
 }
 
 func assistantWebResearch(profile marketdata.CompanyProfile) []map[string]interface{} {
+	analysis := strings.TrimRight(strings.TrimSpace(profile.Analysis), "。.!！")
 	summary := fmt.Sprintf("公开信息摘要：%s；主要产品/业务：%s；业务描述：%s；已有分析：%s",
-		profile.Name, strings.Join(profile.Products, "、"), profile.Business, profile.Analysis)
+		profile.Name, strings.Join(profile.Products, "、"), profile.Business, analysis)
 	return []map[string]interface{}{{"source": "profile_public_context", "summary": summary}}
 }
 

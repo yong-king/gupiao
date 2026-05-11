@@ -169,8 +169,11 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 16px;
+      }
+      .grid > article {
+        width: 100%;
       }
       .wide {
         grid-column: 1 / -1;
@@ -291,16 +294,49 @@
       }
       .assistant-layout {
         display: grid;
-        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 16px;
       }
       .assistant-config,
       .chat-panel {
-        min-height: 520px;
+        min-height: auto;
       }
       .chat-panel {
         display: grid;
         grid-template-rows: auto minmax(260px, 1fr) auto auto auto;
+      }
+      .assistant-meta {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .assistant-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .assistant-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--panel-2);
+        color: var(--muted);
+      }
+      .assistant-chip.healthy {
+        color: var(--accent);
+        border-color: rgba(76, 201, 166, 0.35);
+      }
+      .assistant-chip.warn {
+        color: var(--warning);
+        border-color: rgba(255, 209, 102, 0.35);
+      }
+      .assistant-chip.danger {
+        color: var(--danger);
+        border-color: rgba(255, 107, 122, 0.4);
       }
       .chat-window {
         display: grid;
@@ -331,6 +367,9 @@
         margin: 0;
         line-height: 1.65;
         white-space: pre-wrap;
+      }
+      .chat-message strong {
+        font-size: 13px;
       }
       .chat-message.user {
         justify-self: end;
@@ -545,6 +584,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="./src/main.js?v=28"></script>
+    <script type="module" src="./src/main.js?v=29"></script>
   </body>
 </html>
